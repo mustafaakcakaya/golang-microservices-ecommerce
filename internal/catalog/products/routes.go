@@ -26,10 +26,25 @@ func RegisterRoutes(r chi.Router, repo Repository, log *slog.Logger) {
 		NewGetProductByCategoryHandler(repo),
 		cqrs.Logging[GetProductByCategoryQuery, GetProductByCategoryResult](log, "GetProductByCategory"),
 	)
+	createProduct := cqrs.Chain[CreateProductCommand, CreateProductResult](
+		NewCreateProductHandler(repo),
+		cqrs.Logging[CreateProductCommand, CreateProductResult](log, "CreateProduct"),
+	)
+	updateProduct := cqrs.Chain[UpdateProductCommand, UpdateProductResult](
+		NewUpdateProductHandler(repo),
+		cqrs.Logging[UpdateProductCommand, UpdateProductResult](log, "UpdateProduct"),
+	)
+	deleteProduct := cqrs.Chain[DeleteProductCommand, DeleteProductResult](
+		NewDeleteProductHandler(repo),
+		cqrs.Logging[DeleteProductCommand, DeleteProductResult](log, "DeleteProduct"),
+	)
 
 	r.Route("/products", func(r chi.Router) {
 		r.Get("/", GetProductsRoute(getProducts, log))
+		r.Post("/", CreateProductRoute(createProduct, log))
+		r.Put("/", UpdateProductRoute(updateProduct, log))
 		r.Get("/{id}", GetProductByIDRoute(getProductByID, log))
+		r.Delete("/{id}", DeleteProductRoute(deleteProduct, log))
 		r.Get("/category/{category}", GetProductByCategoryRoute(getProductByCategory, log))
 	})
 }
