@@ -56,6 +56,16 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	// The .NET service seeds only in the Development environment; here it is an
+	// explicit opt-in so nothing depends on guessing where the binary runs.
+	if os.Getenv("CATALOG_SEED") == "true" {
+		seeded, err := postgres.Seed(ctx, pool)
+		if err != nil {
+			return err
+		}
+		log.Info("catalog seeding finished", "inserted", seeded)
+	}
+
 	checks := health.NewRegistry()
 	checks.Register("postgres", pool.Ping)
 

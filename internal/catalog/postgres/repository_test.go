@@ -24,6 +24,15 @@ import (
 func newRepository(t *testing.T) *postgres.ProductRepository {
 	t.Helper()
 
+	repo, _ := newRepositoryWithPool(t)
+	return repo
+}
+
+// newRepositoryWithPool also hands back the pool, for tests that need to call
+// package functions taking one (such as Seed).
+func newRepositoryWithPool(t *testing.T) (*postgres.ProductRepository, *pgxpool.Pool) {
+	t.Helper()
+
 	if testing.Short() {
 		t.Skip("skipping test that needs Docker")
 	}
@@ -66,7 +75,7 @@ func newRepository(t *testing.T) *postgres.ProductRepository {
 		t.Fatalf("migrating: %v", err)
 	}
 
-	return postgres.NewProductRepository(pool)
+	return postgres.NewProductRepository(pool), pool
 }
 
 func newProduct(name string, price int64, categories ...string) products.Product {
