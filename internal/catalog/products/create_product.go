@@ -14,11 +14,11 @@ import (
 
 // CreateProductCommand adds a product to the catalog.
 type CreateProductCommand struct {
-	Name        string
-	Category    []string
+	Name        string   `validate:"required"`
+	Category    []string `validate:"required,min=1"`
 	Description string
-	ImageFile   string
-	Price       decimal.Decimal
+	ImageFile   string          `validate:"required"`
+	Price       decimal.Decimal `validate:"gt=0"`
 }
 
 // CreateProductResult carries the id assigned to the new product.

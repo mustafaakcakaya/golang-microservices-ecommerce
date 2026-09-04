@@ -13,12 +13,12 @@ import (
 
 // UpdateProductCommand replaces a product's fields.
 type UpdateProductCommand struct {
-	ID          uuid.UUID
-	Name        string
+	ID          uuid.UUID `validate:"required"`
+	Name        string    `validate:"required,min=2,max=150"`
 	Categories  []string
 	Description string
 	ImageFile   string
-	Price       decimal.Decimal
+	Price       decimal.Decimal `validate:"gt=0"`
 }
 
 // UpdateProductResult reports whether the update was applied.

@@ -14,7 +14,7 @@ import (
 
 // DeleteProductCommand removes a product from the catalog.
 type DeleteProductCommand struct {
-	ID uuid.UUID
+	ID uuid.UUID `validate:"required"`
 }
 
 // DeleteProductResult reports whether the delete was applied.

@@ -26,17 +26,22 @@ func RegisterRoutes(r chi.Router, repo Repository, log *slog.Logger) {
 		NewGetProductByCategoryHandler(repo),
 		cqrs.Logging[GetProductByCategoryQuery, GetProductByCategoryResult](log, "GetProductByCategory"),
 	)
+	// Commands validate before running; queries carry no rules, matching the
+	// .NET pipeline where ValidationBehaviour is constrained to ICommand.
 	createProduct := cqrs.Chain[CreateProductCommand, CreateProductResult](
 		NewCreateProductHandler(repo),
 		cqrs.Logging[CreateProductCommand, CreateProductResult](log, "CreateProduct"),
+		cqrs.Validating[CreateProductCommand, CreateProductResult](),
 	)
 	updateProduct := cqrs.Chain[UpdateProductCommand, UpdateProductResult](
 		NewUpdateProductHandler(repo),
 		cqrs.Logging[UpdateProductCommand, UpdateProductResult](log, "UpdateProduct"),
+		cqrs.Validating[UpdateProductCommand, UpdateProductResult](),
 	)
 	deleteProduct := cqrs.Chain[DeleteProductCommand, DeleteProductResult](
 		NewDeleteProductHandler(repo),
 		cqrs.Logging[DeleteProductCommand, DeleteProductResult](log, "DeleteProduct"),
+		cqrs.Validating[DeleteProductCommand, DeleteProductResult](),
 	)
 
 	r.Route("/products", func(r chi.Router) {

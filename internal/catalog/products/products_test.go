@@ -228,11 +228,43 @@ func TestRoutesCoverTheWriteEndpoints(t *testing.T) {
 	})
 
 	t.Run("put on a missing product is 404", func(t *testing.T) {
-		body := `{"id":"` + uuid.New().String() + `","name":"ghost","categories":[],"description":"","imageFile":"","price":0}`
+		// Payload must satisfy the rules, otherwise validation answers 400
+		// before the handler ever looks the product up.
+		body := `{"id":"` + uuid.New().String() + `","name":"ghost","categories":[],"description":"","imageFile":"","price":10}`
 		rec := do(t, router, http.MethodPut, "/products", body)
 
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("status = %d, want 404", rec.Code)
+		}
+	})
+
+	t.Run("invalid input is rejected before the handler runs", func(t *testing.T) {
+		// Empty name and a zero price break the rules the .NET validators declare.
+		body := `{"name":"","category":[],"description":"d","imageFile":"","price":0}`
+		rec := do(t, router, http.MethodPost, "/products", body)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400 (body %s)", rec.Code, rec.Body)
+		}
+
+		var problem struct {
+			Title  string            `json:"title"`
+			Errors map[string]string `json:"validationErrors"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+			t.Fatalf("decoding problem details: %v", err)
+		}
+		if problem.Title != "ValidationError" {
+			t.Errorf("title = %q, want ValidationError", problem.Title)
+		}
+		// Every broken rule should be reported, not just the first one.
+		for _, field := range []string{"Name", "Category", "ImageFile", "Price"} {
+			if _, ok := problem.Errors[field]; !ok {
+				t.Errorf("field %s missing from %v", field, problem.Errors)
+			}
+		}
+		if got := problem.Errors["Name"]; got != "Name is required" {
+			t.Errorf("Name message = %q, want the .NET-style wording", got)
 		}
 	})
 
