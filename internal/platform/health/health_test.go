@@ -84,7 +84,7 @@ func serve(t *testing.T, registry *health.Registry) *httptest.ResponseRecorder {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
-	registry.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	registry.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/health", nil))
 
 	return rec
 }

@@ -43,4 +43,6 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Pinned: the config is in v2 format, which v1 cannot read, and an
+          # unpinned "latest" would silently change what CI enforces.
+          version: v2.13.2

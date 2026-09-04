@@ -1,14 +1,8 @@
-run:
-  timeout: 5m
-
+version: "2"
 linters:
   enable:
-    - errcheck
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
     - bodyclose
+    - depguard
     - errorlint
     - goconst
     - misspell
@@ -18,42 +12,52 @@ linters:
     - rowserrcheck
     - sqlclosecheck
     - unconvert
-    - depguard
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-
-  revive:
+  settings:
+    depguard:
+      rules:
+        domain-stays-pure:
+          files:
+            - '**/internal/ordering/domain/**'
+          deny:
+            - pkg: database/sql
+              desc: domain katmanı kalıcılık bilmez; repository arayüzü app/infra katmanında
+            - pkg: github.com/microsoft/go-mssqldb
+              desc: domain katmanı veritabanı sürücüsü tanımaz
+            - pkg: github.com/jackc/pgx
+              desc: domain katmanı veritabanı sürücüsü tanımaz
+            - pkg: net/http
+              desc: domain katmanı taşıma katmanı bilmez
+            - pkg: github.com/go-chi/chi
+              desc: domain katmanı taşıma katmanı bilmez
+            - pkg: github.com/segmentio/kafka-go
+              desc: domain katmanı message broker tanımaz
+            - pkg: github.com/rabbitmq/amqp091-go
+              desc: domain katmanı message broker tanımaz
+    errcheck:
+      check-type-assertions: true
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: exported
-        disabled: true
-
-  # Clean Architecture kuralı: domain katmanı altyapıya bağımlı olamaz.
-  # .NET tarafındaki proje referans yönünün Go'daki karşılığı budur.
-  depguard:
-    rules:
-      domain-stays-pure:
-        files:
-          - "**/internal/ordering/domain/**"
-        deny:
-          - pkg: "database/sql"
-            desc: "domain katmanı kalıcılık bilmez; repository arayüzü app/infra katmanında"
-          - pkg: "github.com/microsoft/go-mssqldb"
-            desc: "domain katmanı veritabanı sürücüsü tanımaz"
-          - pkg: "github.com/jackc/pgx"
-            desc: "domain katmanı veritabanı sürücüsü tanımaz"
-          - pkg: "net/http"
-            desc: "domain katmanı taşıma katmanı bilmez"
-          - pkg: "github.com/go-chi/chi"
-            desc: "domain katmanı taşıma katmanı bilmez"
-          - pkg: "github.com/segmentio/kafka-go"
-            desc: "domain katmanı message broker tanımaz"
-          - pkg: "github.com/rabbitmq/amqp091-go"
-            desc: "domain katmanı message broker tanımaz"
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - goconst
+      - linters:
+          - goconst
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

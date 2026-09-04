@@ -3,12 +3,17 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/catalog/api"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/catalog/postgres"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/health"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/httpx"
 )
@@ -34,9 +39,27 @@ func run(log *slog.Logger) error {
 		addr = defaultAddr
 	}
 
-	// No dependencies registered yet, so /health is a liveness probe until
-	// persistence arrives.
-	checks := health.NewRegistry()
+	databaseURL := os.Getenv("CATALOG_DATABASE_URL")
+	if databaseURL == "" {
+		return errors.New("CATALOG_DATABASE_URL is required")
+	}
 
-	return httpx.Run(ctx, addr, api.Router(checks), log)
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		return fmt.Errorf("creating database pool: %w", err)
+	}
+	defer pool.Close()
+
+	// Marten builds its schema on first use; here migrations run at startup
+	// so the binary owns its schema the same way.
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		return err
+	}
+
+	checks := health.NewRegistry()
+	checks.Register("postgres", pool.Ping)
+
+	repo := postgres.NewProductRepository(pool)
+
+	return httpx.Run(ctx, addr, api.Router(repo, checks, log), log)
 }
