@@ -27,6 +27,12 @@ FROM alpine:3.20 AS final
 RUN apk add --no-cache ca-certificates \
     && adduser -D -u 10001 service
 
+# /data exists in the image and is owned by the service user so that a named
+# volume mounted there inherits that ownership - Docker seeds an empty volume
+# from the image path. Without this the volume is root-owned and a non-root
+# service cannot create its SQLite file.
+RUN mkdir -p /data && chown service:service /data
+
 COPY --from=build /out/service /usr/local/bin/service
 
 USER service

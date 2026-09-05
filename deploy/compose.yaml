@@ -12,6 +12,7 @@
 #   6379   ->   6389   redis
 #   6000   ->   6100   catalog service
 #   6001   ->   6101   basket service
+#   6002   ->   6102   discount service (gRPC)
 #
 # Credentials below are local-only defaults; nothing here is meant for a
 # deployed environment.
@@ -85,6 +86,30 @@ services:
     ports:
       - "${CATALOG_PORT:-6100}:8080"
 
+  discount:
+    container_name: go-discount
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        SERVICE: discount
+    environment:
+      - DISCOUNT_GRPC_ADDR=:8080
+      # SQLite lives on a volume so coupons survive a container replacement.
+      - DISCOUNT_DATABASE_PATH=/data/discount.db
+      - DISCOUNT_SEED=true
+    volumes:
+      - discount_data:/data
+    ports:
+      - "${DISCOUNT_PORT:-6102}:8080"
+    healthcheck:
+      # The image has no shell tools for gRPC, so the service probes itself
+      # through the standard health service using its own binary.
+      test: ["CMD", "/usr/local/bin/service", "-healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   basket:
     container_name: go-basket
     build:
@@ -96,10 +121,14 @@ services:
       - BASKET_HTTP_ADDR=:8080
       - BASKET_DATABASE_URL=postgres://postgres:postgres@basketdb:5432/basket?sslmode=disable
       - BASKET_REDIS_URL=redis://distributedcache:6379/0
+      - BASKET_DISCOUNT_GRPC_ADDR=discount:8080
     depends_on:
       basketdb:
         condition: service_healthy
       distributedcache:
+        condition: service_healthy
+      discount:
+        # Basket refuses to start without Discount, so it waits for it.
         condition: service_healthy
     ports:
       - "${BASKET_PORT:-6101}:8080"
@@ -108,3 +137,4 @@ volumes:
   postgres_catalog:
   postgres_basket:
   redis_data:
+  discount_data:

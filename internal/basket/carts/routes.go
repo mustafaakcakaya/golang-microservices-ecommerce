@@ -12,13 +12,13 @@ import (
 type routeLogger = *slog.Logger
 
 // RegisterRoutes mounts every basket slice on r.
-func RegisterRoutes(r chi.Router, repo Repository, log *slog.Logger) {
+func RegisterRoutes(r chi.Router, repo Repository, discounts DiscountLookup, log *slog.Logger) {
 	getBasket := cqrs.Chain[GetBasketQuery, GetBasketResult](
 		NewGetBasketHandler(repo),
 		cqrs.Logging[GetBasketQuery, GetBasketResult](log, "GetBasket"),
 	)
 	storeBasket := cqrs.Chain[StoreBasketCommand, StoreBasketResult](
-		NewStoreBasketHandler(repo),
+		NewStoreBasketHandler(repo, discounts),
 		cqrs.Logging[StoreBasketCommand, StoreBasketResult](log, "StoreBasket"),
 		cqrs.Validating[StoreBasketCommand, StoreBasketResult](),
 	)

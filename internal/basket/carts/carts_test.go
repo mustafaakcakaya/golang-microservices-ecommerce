@@ -50,6 +50,23 @@ func (r *fakeRepository) Delete(_ context.Context, userName string) error {
 	return nil
 }
 
+// fakeDiscounts answers a fixed amount per product name.
+type fakeDiscounts struct {
+	amounts map[string]int32
+	failOn  error
+	calls   []string
+}
+
+func (d *fakeDiscounts) AmountFor(_ context.Context, productName string) (int32, error) {
+	d.calls = append(d.calls, productName)
+	if d.failOn != nil {
+		return 0, d.failOn
+	}
+	return d.amounts[productName], nil
+}
+
+func noDiscounts() *fakeDiscounts { return &fakeDiscounts{amounts: map[string]int32{}} }
+
 func sampleCart(userName string) carts.ShoppingCart {
 	return carts.ShoppingCart{
 		UserName: userName,
@@ -118,7 +135,7 @@ func TestStoreReplacesTheWholeBasket(t *testing.T) {
 	t.Parallel()
 
 	repo := newFakeRepository(sampleCart("mustafa"))
-	handler := carts.NewStoreBasketHandler(repo)
+	handler := carts.NewStoreBasketHandler(repo, noDiscounts())
 
 	replacement := carts.ShoppingCart{
 		UserName: "mustafa",
@@ -169,7 +186,7 @@ func TestRoutes(t *testing.T) {
 
 	repo := newFakeRepository(sampleCart("mustafa"))
 	router := chi.NewRouter()
-	carts.RegisterRoutes(router, repo, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	carts.RegisterRoutes(router, repo, noDiscounts(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	do := func(t *testing.T, method, target, body string) *httptest.ResponseRecorder {
 		t.Helper()

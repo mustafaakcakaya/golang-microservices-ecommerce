@@ -4,14 +4,18 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -27,12 +31,58 @@ const (
 )
 
 func main() {
+	// The container image carries no shell tools that speak gRPC, so the binary
+	// doubles as its own health probe: `service -healthcheck` dials the local
+	// server and exits non-zero unless it reports SERVING.
+	healthcheck := flag.Bool("healthcheck", false, "probe the local server and exit")
+	flag.Parse()
+
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	if *healthcheck {
+		if err := probe(); err != nil {
+			log.Error("healthcheck failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if err := run(log); err != nil {
 		log.Error("discount service stopped with error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// probe checks the server this binary would serve, addressing it on localhost.
+func probe() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	addr := os.Getenv("DISCOUNT_GRPC_ADDR")
+	if addr == "" {
+		addr = defaultAddr
+	}
+	// A listen address such as ":8080" has no host; dial the loopback.
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	}
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("dialling %s: %w", addr, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	response, err := grpc_health_v1.NewHealthClient(conn).Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+	if err != nil {
+		return fmt.Errorf("health check: %w", err)
+	}
+
+	if response.GetStatus() != grpc_health_v1.HealthCheckResponse_SERVING {
+		return fmt.Errorf("status is %s", response.GetStatus())
+	}
+
+	return nil
 }
 
 func run(log *slog.Logger) error {
