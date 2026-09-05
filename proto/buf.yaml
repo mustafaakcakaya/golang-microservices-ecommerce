@@ -1,0 +1,25 @@
+version: v2
+modules:
+  - path: .
+# The .proto is shared with the .NET service, which annotates the RPCs with
+# google.api.http for JSON transcoding. Those annotations are not used by the Go
+# server, but the import has to resolve for the file to compile, so googleapis
+# is declared as a dependency rather than the annotations being stripped - the
+# file stays byte-compatible with the .NET one.
+deps:
+  - buf.build/googleapis/googleapis
+lint:
+  use:
+    - STANDARD
+  except:
+    # The shared file predates these rules; renaming fields would break the
+    # .NET service and any existing client.
+    - FIELD_LOWER_SNAKE_CASE
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_STANDARD_NAME
+    - PACKAGE_VERSION_SUFFIX
+    - PACKAGE_DIRECTORY_MATCH
+breaking:
+  use:
+    - FILE

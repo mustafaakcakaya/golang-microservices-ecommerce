@@ -33,3 +33,7 @@ fmt: ## Kaynak kodu biçimlendir
 .PHONY: vet
 vet: ## go vet
 	$(GO) vet ./...
+
+.PHONY: proto
+proto: ## .proto dosyasindan Go kodunu yeniden uret (buf gerekir)
+	cd proto && buf generate

@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+import "google/api/annotations.proto";
+
+option csharp_namespace = "Discount.Grpc";
+option go_package = "github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/discount/discountpb;discountpb";
+
+package discount;
+
+// The discount service 
+service DiscountProtoService {
+  // Discount CRUD Operations
+  rpc GetDiscount (GetDiscountRequest) returns (CouponModel) {
+    option (google.api.http) = {
+      get: "/api/discount/{productName}"
+    };
+  }
+  rpc CreateDiscount (CreateDiscountRequest) returns (CouponModel) {
+    option (google.api.http) = {
+      post: "/api/discount"
+      body: "coupon"
+    };
+  }
+  rpc UpdateDiscount (UpdateDiscountRequest) returns (CouponModel) {
+    option (google.api.http) = {
+      put: "/api/discount"
+      body: "coupon"
+    };
+  }
+  rpc DeleteDiscount (DeleteDiscountRequest) returns (DeleteDiscountResponse) {
+    option (google.api.http) = {
+      delete: "/api/discount/{productName}"
+    };
+  }
+}
+
+message GetDiscountRequest {
+  string productName = 1;
+}
+
+message CouponModel {
+  int32 id = 1;
+  string productName = 2;
+  string desciption = 3;
+  int32 amount = 4;
+}
+
+message CreateDiscountRequest {
+  CouponModel coupon = 1; 
+}
+
+message UpdateDiscountRequest {
+  CouponModel coupon = 1;
+}
+
+message DeleteDiscountRequest {
+  string productName = 1;
+}
+
+message DeleteDiscountResponse {
+  string success = 1;
+}
+
+

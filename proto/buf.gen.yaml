@@ -1,0 +1,17 @@
+version: v2
+# Generated code is committed, so neither CI nor a fresh clone needs protoc or
+# buf to build the project. Regenerate with `make proto` after changing the
+# .proto file.
+managed:
+  enabled: false
+plugins:
+  - local: protoc-gen-go
+    out: ../internal/discount/discountpb
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: ../internal/discount/discountpb
+    opt: paths=source_relative
+inputs:
+  - directory: .
+    paths:
+      - discount.proto
