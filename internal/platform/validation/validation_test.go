@@ -49,7 +49,7 @@ func TestStructReportsEveryBrokenRule(t *testing.T) {
 	}
 }
 
-func TestMessagesReadLikeTheDotnetValidators(t *testing.T) {
+func TestMessagesReadAsProse(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {

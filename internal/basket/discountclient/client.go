@@ -14,9 +14,8 @@ import (
 // Client resolves discounts over gRPC.
 //
 // The generated package is reused rather than a second copy of the contract
-// being generated for Basket, as the .NET project does by including the .proto
-// in both projects: one module means one set of stubs and no chance of the two
-// drifting apart.
+// being generated for this service: one module means one set of stubs and no
+// chance of the two drifting apart.
 type Client struct {
 	rpc discountpb.DiscountProtoServiceClient
 }

@@ -34,9 +34,8 @@ func NewDeleteProductHandler(repo Repository) *DeleteProductHandler {
 
 // Handle implements cqrs.Handler.
 //
-// Deleting an unknown id succeeds, as it does in the .NET handler: Marten's
-// Delete does not check existence first. The outcome the caller cares about -
-// the product is gone - holds either way.
+// Deleting an unknown id succeeds: the outcome the caller cares about - the
+// product is gone - holds either way.
 func (h *DeleteProductHandler) Handle(ctx context.Context, c DeleteProductCommand) (DeleteProductResult, error) {
 	if err := h.repo.Delete(ctx, c.ID); err != nil {
 		return DeleteProductResult{}, err

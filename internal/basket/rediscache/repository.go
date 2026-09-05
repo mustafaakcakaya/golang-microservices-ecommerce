@@ -17,17 +17,17 @@ import (
 
 // DefaultTTL bounds how long a cached basket may live.
 //
-// The .NET CachedBasketRepository sets no expiry, so an abandoned basket stays
-// in Redis forever and any cache that drifts out of step never heals. A TTL
-// costs nothing here and turns both problems into a bounded window.
+// Without an expiry an abandoned basket would stay in Redis forever, and an
+// entry that drifts out of step would never heal. A TTL turns both into a
+// bounded window.
 const DefaultTTL = 30 * time.Minute
 
-// keyPrefix namespaces the entries. The .NET version uses the bare user name,
-// which would collide with any other service sharing the same Redis.
+// keyPrefix namespaces the entries, so they cannot collide with another
+// service sharing the same Redis.
 const keyPrefix = "basket:"
 
-// CachedRepository is a cache-aside decorator around another Repository,
-// mirroring the .NET decorator registered in front of BasketRepository.
+// CachedRepository is a cache-aside decorator around another Repository, so the
+// handlers stay unaware that a cache exists.
 type CachedRepository struct {
 	inner  carts.Repository
 	client redis.UniversalClient

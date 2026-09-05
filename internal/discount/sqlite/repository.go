@@ -88,8 +88,7 @@ func (r *CouponRepository) Delete(ctx context.Context, productName string) error
 	if err != nil {
 		return fmt.Errorf("checking delete for %q: %w", productName, err)
 	}
-	// The .NET service loads first and raises NotFound; the row count gives the
-	// same answer in one statement.
+	// The row count answers "did it exist" without a separate SELECT first.
 	if affected == 0 {
 		return apperr.NotFound("Coupon", productName)
 	}

@@ -206,7 +206,7 @@ func TestEntriesExpire(t *testing.T) {
 	if _, err := repo.GetByUserName(ctx, "mustafa"); err != nil {
 		t.Fatalf("reading after expiry: %v", err)
 	}
-	// The .NET decorator sets no expiry; the TTL is what bounds staleness here.
+	// The TTL is what bounds how long a stale entry can be served.
 	if inner.reads != 2 {
 		t.Errorf("inner reads = %d, want 2: the entry should have expired", inner.reads)
 	}

@@ -40,7 +40,7 @@ func NewUpdateProductHandler(repo Repository) *UpdateProductHandler {
 //
 // The product is loaded first so updating a missing id is a 404 rather than a
 // silent insert: Store upserts, so writing straight away would resurrect a
-// deleted product. The .NET handler loads for the same reason.
+// deleted product.
 func (h *UpdateProductHandler) Handle(ctx context.Context, c UpdateProductCommand) (UpdateProductResult, error) {
 	product, err := h.repo.ByID(ctx, c.ID)
 	if err != nil {
@@ -60,8 +60,8 @@ func (h *UpdateProductHandler) Handle(ctx context.Context, c UpdateProductComman
 	return UpdateProductResult{IsSuccess: true}, nil
 }
 
-// updateProductRequest mirrors the .NET UpdateProductRequest, which carries the
-// id in the body rather than the path.
+// updateProductRequest is the wire shape of an update call. The id travels in
+// the body rather than the path.
 type updateProductRequest struct {
 	ID          uuid.UUID       `json:"id"`
 	Name        string          `json:"name"`

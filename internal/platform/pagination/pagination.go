@@ -1,15 +1,14 @@
 // Package pagination carries paging input and results between layers.
 package pagination
 
-// DefaultPageSize matches the .NET PaginationRequest default.
+// DefaultPageSize is used when the caller asks for no particular size.
 const DefaultPageSize = 10
 
-// MaxPageSize caps what a caller may request, so a single request cannot pull
-// the whole table. The .NET version has no such cap; it is added here because
-// the limit reaches SQL directly.
+// MaxPageSize caps what a caller may request. The limit reaches SQL directly,
+// so without a cap a single request could pull an entire table.
 const MaxPageSize = 100
 
-// Request is the paging input, zero-based like the .NET PaginationRequest.
+// Request is the paging input. PageIndex is zero-based.
 type Request struct {
 	PageIndex int `json:"pageIndex"`
 	PageSize  int `json:"pageSize"`

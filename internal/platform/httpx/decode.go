@@ -9,15 +9,15 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/apperr"
 )
 
-// MaxBodyBytes caps request bodies. ASP.NET applies a similar limit by default;
-// without one a single request could exhaust memory.
+// MaxBodyBytes caps request bodies; without a limit a single request could
+// exhaust memory.
 const MaxBodyBytes = 1 << 20 // 1 MiB
 
 // DecodeJSON reads a JSON body into target, reporting malformed input as a
 // bad request rather than letting a decode error surface as a 500.
 //
-// Unknown fields are accepted, matching the .NET model binder, so a client
-// sending an extra property is not broken by the port.
+// Unknown fields are accepted, so a client sending an extra property keeps
+// working.
 func DecodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 

@@ -86,7 +86,7 @@ func (r *ProductRepository) ByCategory(ctx context.Context, category string) ([]
 	return collect(rows)
 }
 
-// Store upserts the document, matching Marten's Store semantics.
+// Store upserts the document: the same call creates or replaces.
 func (r *ProductRepository) Store(ctx context.Context, product products.Product) error {
 	const query = `
 		INSERT INTO products (id, data) VALUES ($1, $2)

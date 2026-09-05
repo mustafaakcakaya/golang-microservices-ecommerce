@@ -251,7 +251,7 @@ func TestDeleteRemovesProductAndIsIdempotent(t *testing.T) {
 		t.Errorf("product still readable after delete: %v", err)
 	}
 
-	// Marten's Delete is idempotent; the port keeps that behaviour.
+	// Delete is idempotent: removing a missing product is not an error.
 	if err := repo.Delete(ctx, product.ID); err != nil {
 		t.Errorf("deleting a missing product should not fail: %v", err)
 	}

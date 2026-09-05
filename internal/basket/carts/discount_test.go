@@ -93,8 +93,8 @@ func TestDiscountLargerThanPriceClampsAtZero(t *testing.T) {
 	}
 
 	stored, _ := repo.GetByUserName(context.Background(), "mustafa")
-	// The .NET handler subtracts without a guard, which would store -40 here
-	// and produce a negative basket total.
+	// Subtracting without a guard would store -40 here and produce a negative
+	// basket total.
 	if !stored.Items[0].Price.IsZero() {
 		t.Errorf("price = %s, want 0 rather than a negative line", stored.Items[0].Price)
 	}

@@ -15,9 +15,8 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-// Migrate applies pending migrations. Marten creates its schema on first use;
-// here the schema is versioned SQL shipped inside the binary so every
-// environment reaches the same state the same way.
+// Migrate applies pending migrations. The schema is versioned SQL shipped
+// inside the binary, so every environment reaches the same state the same way.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	db := stdlib.OpenDBFromPool(pool)
 	defer func() { _ = db.Close() }()

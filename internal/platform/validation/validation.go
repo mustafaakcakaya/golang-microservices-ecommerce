@@ -1,9 +1,8 @@
 // Package validation checks command input before a handler runs.
 //
-// The .NET project declares rules in FluentValidation classes and a MediatR
-// behaviour throws when they fail. Here the rules live in struct tags and a
-// cqrs middleware turns failures into apperr.Validation, so the HTTP layer
-// reports them as problem details with a field-by-field breakdown.
+// Rules live in struct tags and a cqrs middleware turns failures into
+// apperr.Validation, so the transport layer reports them as problem details
+// with a field-by-field breakdown rather than a single opaque message.
 package validation
 
 import (
@@ -70,8 +69,8 @@ func Struct(v any) error {
 	return apperr.Validation(fields)
 }
 
-// message renders a rule failure in the style of the .NET validators
-// ("Name is required") rather than exposing raw tag names.
+// message renders a rule failure in prose ("Name is required") rather than
+// exposing raw tag names to the caller.
 func message(err validator.FieldError) string {
 	name := err.Field()
 

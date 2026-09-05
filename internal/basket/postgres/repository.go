@@ -15,9 +15,9 @@ import (
 
 // BasketRepository stores baskets in PostgreSQL.
 //
-// Marten keeps documents as JSONB; the same shape is used here - the items are
-// a JSONB column keyed by user name - so the storage model matches the .NET
-// service rather than normalising the basket into rows it never queries.
+// The items are a JSONB column keyed by user name rather than rows in a
+// separate table: nothing queries a line on its own, so normalising would add
+// joins without buying anything.
 type BasketRepository struct {
 	pool *pgxpool.Pool
 }
@@ -73,8 +73,7 @@ func (r *BasketRepository) Store(ctx context.Context, cart carts.ShoppingCart) e
 	return nil
 }
 
-// Delete removes a basket. Removing one that does not exist is not an error,
-// matching Marten's behaviour in the .NET repository.
+// Delete removes a basket. Removing one that does not exist is not an error.
 func (r *BasketRepository) Delete(ctx context.Context, userName string) error {
 	const query = `DELETE FROM baskets WHERE user_name = $1`
 

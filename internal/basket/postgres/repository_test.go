@@ -172,7 +172,7 @@ func TestDeleteRemovesBasketAndIsIdempotent(t *testing.T) {
 	if err := repo.Delete(ctx, "mustafa"); err != nil {
 		t.Fatalf("deleting: %v", err)
 	}
-	// Deleting again must not fail, matching Marten's behaviour.
+	// Deleting again must not fail: the outcome is the same either way.
 	if err := repo.Delete(ctx, "mustafa"); err != nil {
 		t.Fatalf("second delete: %v", err)
 	}

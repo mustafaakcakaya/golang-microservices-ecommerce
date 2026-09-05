@@ -13,9 +13,9 @@ type Coupon struct {
 
 // NoDiscount is what GetDiscount answers for a product with no coupon.
 //
-// The .NET service returns this placeholder instead of an error, and Basket
-// depends on that: it subtracts coupon.Amount from every line without checking
-// whether a discount exists, so a NotFound would fail the whole checkout.
+// Basket subtracts the amount from every line without checking whether a
+// discount exists, so answering an error here would fail a whole checkout the
+// moment one product lacked a coupon.
 func NoDiscount() Coupon {
 	return Coupon{ProductName: "No Discount", Description: "No Discount Desc", Amount: 0}
 }

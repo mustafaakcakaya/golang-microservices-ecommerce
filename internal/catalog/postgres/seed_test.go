@@ -28,9 +28,9 @@ func TestSeedPopulatesEmptyCatalogOnce(t *testing.T) {
 		t.Fatalf("count = %d, want 4", count)
 	}
 
-	// Re-running must not duplicate: the .NET seeder returns early when any
-	// product exists, and ids are derived rather than random so a repeat run
-	// would upsert the same rows anyway.
+	// Re-running must not duplicate: seeding returns early when any product
+	// exists, and ids are derived rather than random so a repeat run would
+	// upsert the same rows anyway.
 	again, err := postgres.Seed(ctx, pool)
 	if err != nil {
 		t.Fatalf("second seed: %v", err)

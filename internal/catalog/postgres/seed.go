@@ -11,17 +11,15 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/catalog/products"
 )
 
-// seedNamespace derives stable ids for the sample products. The .NET seeder
-// calls Guid.NewGuid(), so a reset database gets different ids every time;
-// deriving them from the product name instead makes seeding idempotent and
-// gives tests and API examples ids that do not move.
+// seedNamespace derives stable ids for the sample products. Random ids would
+// change on every database reset; deriving them from the product name keeps
+// seeding idempotent and gives tests and API examples ids that do not move.
 var seedNamespace = uuid.MustParse("6f2c1e64-9d0f-4a1e-9c1a-2d1f2b8f4c31")
 
 // Seed inserts the sample catalog when the table is empty.
 //
-// It is a no-op on a populated database, mirroring the .NET initial data class,
-// which returns early if any product exists. Callers decide when to run it;
-// the service only does so when explicitly asked.
+// It is a no-op on a populated database. Callers decide when to run it; the
+// service only does so when explicitly asked.
 func Seed(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	var existing int64
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM products`).Scan(&existing); err != nil {
@@ -41,7 +39,7 @@ func Seed(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	return len(sampleCatalog()), nil
 }
 
-// sampleCatalog is the same four products the .NET service seeds.
+// sampleCatalog is the sample data a fresh database starts with.
 func sampleCatalog() []products.Product {
 	const description = "This phone is the company's biggest change to its flagship smartphone in years."
 

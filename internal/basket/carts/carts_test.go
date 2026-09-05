@@ -108,8 +108,7 @@ func TestCartSerializesTotalPrice(t *testing.T) {
 		t.Fatalf("unmarshalling: %v", err)
 	}
 
-	// The .NET model exposes TotalPrice as a computed property, so clients see
-	// it even though it is never stored.
+	// The total is derived, not stored, but clients still see it.
 	total, ok := decoded["totalPrice"]
 	if !ok {
 		t.Fatalf("totalPrice missing from %s", encoded)
@@ -250,8 +249,8 @@ func TestRoutes(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
 			t.Fatalf("decoding problem details: %v", err)
 		}
-		// The rule lives on the nested cart, matching the .NET validator's
-		// RuleFor(x => x.Cart!.UserName).
+		// The rule lives on the nested cart, so the failing field is reported
+		// as UserName rather than Cart.
 		if _, ok := problem.Errors["UserName"]; !ok {
 			t.Errorf("validation errors = %v, want a UserName entry", problem.Errors)
 		}

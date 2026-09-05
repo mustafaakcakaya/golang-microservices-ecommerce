@@ -37,8 +37,7 @@ func NewCreateProductHandler(repo Repository) *CreateProductHandler {
 }
 
 // Handle implements cqrs.Handler. The id is generated here rather than by the
-// database, so the caller learns it without a round trip - the same effect
-// Marten's identity assignment has in the .NET handler.
+// database, so the caller learns it without a round trip.
 func (h *CreateProductHandler) Handle(ctx context.Context, c CreateProductCommand) (CreateProductResult, error) {
 	product := Product{
 		ID:          uuid.New(),
@@ -56,7 +55,7 @@ func (h *CreateProductHandler) Handle(ctx context.Context, c CreateProductComman
 	return CreateProductResult{ID: product.ID}, nil
 }
 
-// createProductRequest mirrors the .NET CreateProductRequest.
+// createProductRequest is the wire shape of a create call.
 type createProductRequest struct {
 	Name        string          `json:"name"`
 	Category    []string        `json:"category"`

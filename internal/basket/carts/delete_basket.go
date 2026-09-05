@@ -33,8 +33,7 @@ func NewDeleteBasketHandler(repo Repository) *DeleteBasketHandler {
 
 // Handle implements cqrs.Handler.
 //
-// Deleting a basket the user does not have succeeds, matching the .NET handler:
-// Marten's Delete does not check existence first, and the caller's intent - the
+// Deleting a basket the user does not have succeeds: the caller's intent - the
 // basket is gone - holds either way.
 func (h *DeleteBasketHandler) Handle(ctx context.Context, c DeleteBasketCommand) (DeleteBasketResult, error) {
 	if err := h.repo.Delete(ctx, c.UserName); err != nil {

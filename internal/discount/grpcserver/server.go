@@ -31,7 +31,7 @@ func New(repo coupons.Repository, log *slog.Logger) *Server {
 //
 // Answering NotFound would be more honest, but Basket subtracts the amount from
 // every line without checking, so an error would fail an entire checkout the
-// moment one product lacked a coupon. The .NET service makes the same choice.
+// moment one product lacked a coupon.
 func (s *Server) GetDiscount(ctx context.Context, request *discountpb.GetDiscountRequest) (*discountpb.CouponModel, error) {
 	coupon, err := s.repo.ByProductName(ctx, request.GetProductName())
 	switch {
@@ -90,8 +90,8 @@ func (s *Server) DeleteDiscount(ctx context.Context, request *discountpb.DeleteD
 
 	s.log.InfoContext(ctx, "discount deleted", "productName", request.GetProductName())
 
-	// The contract types success as a string, not a bool; kept as-is so the
-	// .NET client keeps working.
+	// The contract types success as a string, not a bool; kept as-is so
+	// existing clients keep working.
 	return &discountpb.DeleteDiscountResponse{Success: "true"}, nil
 }
 
@@ -126,8 +126,8 @@ func toModel(coupon coupons.Coupon) *discountpb.CouponModel {
 	return &discountpb.CouponModel{
 		Id:          coupon.ID,
 		ProductName: coupon.ProductName,
-		// The field is misspelled in the shared contract. Renaming it would
-		// break the .NET service and its clients, so the typo is carried.
+		// The field is misspelled in the published contract. Renaming it would
+		// break every existing client, so the typo is carried.
 		Desciption: coupon.Description,
 		Amount:     coupon.Amount,
 	}

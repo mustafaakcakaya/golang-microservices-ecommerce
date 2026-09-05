@@ -82,9 +82,9 @@ func run(log *slog.Logger) error {
 
 	var repo carts.Repository = postgres.NewBasketRepository(pool)
 
-	// Redis is required, as it is in the .NET service. Starting without it would
-	// run silently uncached: every read would hit PostgreSQL and the problem
-	// would only show up as latency under load, long after the deploy.
+	// Redis is required. Starting without it would run silently uncached: every
+	// read would hit PostgreSQL and the problem would only show up as latency
+	// under load, long after the deploy.
 	redisURL := os.Getenv("BASKET_REDIS_URL")
 	if redisURL == "" {
 		return errors.New("BASKET_REDIS_URL is required")

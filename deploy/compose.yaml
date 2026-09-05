@@ -2,11 +2,11 @@
 #
 #   docker compose -f deploy/compose.yaml up --build
 #
-# Host ports are deliberately offset from the .NET project's compose file, so
-# both stacks can run at the same time and be compared. Each is overridable if
-# something else already holds the port:
+# Host ports are deliberately offset from the conventional defaults, so another
+# stack using them can run at the same time. Each is overridable if something
+# else already holds the port:
 #
-#   .NET        Go (here)
+#   usual       here
 #   5432   ->   5442   catalog database
 #   5433   ->   5443   basket database
 #   6379   ->   6389   redis

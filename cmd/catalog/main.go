@@ -50,14 +50,13 @@ func run(log *slog.Logger) error {
 	}
 	defer pool.Close()
 
-	// Marten builds its schema on first use; here migrations run at startup
-	// so the binary owns its schema the same way.
+	// Migrations run at startup so the binary owns its schema.
 	if err := postgres.Migrate(ctx, pool); err != nil {
 		return err
 	}
 
-	// The .NET service seeds only in the Development environment; here it is an
-	// explicit opt-in so nothing depends on guessing where the binary runs.
+	// Seeding is an explicit opt-in so nothing depends on guessing where the
+	// binary runs.
 	if os.Getenv("CATALOG_SEED") == "true" {
 		seeded, err := postgres.Seed(ctx, pool)
 		if err != nil {

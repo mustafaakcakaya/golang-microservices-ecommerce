@@ -1,5 +1,5 @@
 -- +goose Up
--- Products are stored as documents, the way Marten stores them in the .NET
+-- Products are stored as documents rather than relational rows: nothing in the
 -- service: the id is a real column for lookups, everything else is JSONB.
 CREATE TABLE IF NOT EXISTS products (
     id   uuid  PRIMARY KEY,

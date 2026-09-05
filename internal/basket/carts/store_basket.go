@@ -33,13 +33,13 @@ func NewStoreBasketHandler(repo Repository, discounts DiscountLookup) *StoreBask
 
 // Handle implements cqrs.Handler.
 //
-// Prices are discounted before the basket is stored, so the stored basket is
-// what the customer will be charged - the same order the .NET handler uses.
+// Prices are discounted before the basket is stored, so what is persisted is
+// what the customer will be charged.
 //
 // A lookup failure fails the whole request rather than storing undiscounted
-// prices. That couples Basket's availability to Discount, which is the .NET
-// behaviour and the safer of the two: silently charging full price is worse
-// than asking the caller to retry.
+// prices. That couples this service's availability to Discount, which is the
+// safer half of the trade: silently charging full price is worse than asking
+// the caller to retry.
 func (h *StoreBasketHandler) Handle(ctx context.Context, c StoreBasketCommand) (StoreBasketResult, error) {
 	cart, err := h.applyDiscounts(ctx, c.Cart)
 	if err != nil {
@@ -55,8 +55,8 @@ func (h *StoreBasketHandler) Handle(ctx context.Context, c StoreBasketCommand) (
 
 // applyDiscounts subtracts each product's coupon from its line price.
 //
-// One call per line, as in the .NET handler: the contract offers no batch RPC,
-// so a basket of n products costs n round trips.
+// One call per line: the contract offers no batch RPC, so a basket of n
+// products costs n round trips.
 func (h *StoreBasketHandler) applyDiscounts(ctx context.Context, cart ShoppingCart) (ShoppingCart, error) {
 	discounted := make([]ShoppingCartItem, len(cart.Items))
 	copy(discounted, cart.Items)
@@ -69,8 +69,7 @@ func (h *StoreBasketHandler) applyDiscounts(ctx context.Context, cart ShoppingCa
 
 		price := discounted[i].Price.Sub(decimal.NewFromInt(int64(amount)))
 		// A coupon worth more than the product would otherwise store a negative
-		// price and a negative basket total. The .NET handler subtracts without
-		// this guard.
+		// price and a negative basket total.
 		if price.IsNegative() {
 			price = decimal.Zero
 		}

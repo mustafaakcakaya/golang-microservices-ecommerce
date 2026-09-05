@@ -239,7 +239,7 @@ func TestRoutesCoverTheWriteEndpoints(t *testing.T) {
 	})
 
 	t.Run("invalid input is rejected before the handler runs", func(t *testing.T) {
-		// Empty name and a zero price break the rules the .NET validators declare.
+		// An empty name and a zero price both break the declared rules.
 		body := `{"name":"","category":[],"description":"d","imageFile":"","price":0}`
 		rec := do(t, router, http.MethodPost, "/products", body)
 
@@ -264,7 +264,7 @@ func TestRoutesCoverTheWriteEndpoints(t *testing.T) {
 			}
 		}
 		if got := problem.Errors["Name"]; got != "Name is required" {
-			t.Errorf("Name message = %q, want the .NET-style wording", got)
+			t.Errorf("Name message = %q, want prose rather than a tag name", got)
 		}
 	})
 

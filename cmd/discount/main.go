@@ -128,7 +128,7 @@ func run(log *slog.Logger) error {
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
 	// Reflection lets grpcurl and similar tools explore the service without a
-	// local copy of the .proto, which the .NET service gets from its Swagger UI.
+	// local copy of the .proto.
 	reflection.Register(server)
 
 	var listenConfig net.ListenConfig

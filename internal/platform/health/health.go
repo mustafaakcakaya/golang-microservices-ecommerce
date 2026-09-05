@@ -1,9 +1,8 @@
 // Package health exposes the /health endpoint shared by every service.
 //
-// Mirrors the .NET AddHealthChecks setup: each service registers the
-// dependencies it needs (database, cache, broker) under a name, and the
-// endpoint reports them individually so a failing dependency is identifiable
-// rather than hidden behind a single boolean.
+// Each service registers the dependencies it needs (database, cache, broker)
+// under a name, and the endpoint reports them individually so a failing
+// dependency is identifiable rather than hidden behind a single boolean.
 package health
 
 import (

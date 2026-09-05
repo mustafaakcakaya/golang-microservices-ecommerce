@@ -6,15 +6,14 @@ import (
 	"time"
 )
 
-// SlowThreshold matches the .NET LoggingBehaviour, which reports requests
-// taking longer than three seconds.
+// SlowThreshold is the duration past which a handled request is reported as
+// slow.
 const SlowThreshold = 3 * time.Second
 
 // Logging records the start, outcome and duration of each handled request.
 //
-// Unlike the .NET behaviour it does not log the request body: request types
-// carry user input and, in Ordering, payment fields. Only the operation name
-// is logged.
+// The request body is deliberately never logged: request types carry user
+// input and, in Ordering, payment fields. Only the operation name is.
 func Logging[In, Out any](log *slog.Logger, operation string) Middleware[In, Out] {
 	return func(next HandlerFunc[In, Out]) HandlerFunc[In, Out] {
 		return func(ctx context.Context, in In) (Out, error) {

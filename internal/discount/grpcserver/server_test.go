@@ -239,7 +239,7 @@ func TestDeleteDiscountRemovesAndReportsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("deleting: %v", err)
 	}
-	// The contract types success as a string; the .NET client reads "true".
+	// The contract types success as a string rather than a bool.
 	if response.GetSuccess() != "true" {
 		t.Errorf("success = %q, want \"true\"", response.GetSuccess())
 	}

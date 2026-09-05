@@ -20,10 +20,10 @@ type Repository interface {
 	// ByCategory returns every product tagged with the category.
 	ByCategory(ctx context.Context, category string) ([]Product, error)
 
-	// Store inserts or replaces the product, like Marten's session.Store.
+	// Store inserts or replaces the product.
 	Store(ctx context.Context, product Product) error
 
-	// Delete removes the product. Deleting a missing product is not an error,
-	// matching Marten's idempotent Delete.
+	// Delete removes the product. Deleting a missing product is not an error:
+	// the caller's intent - the product is gone - holds either way.
 	Delete(ctx context.Context, id uuid.UUID) error
 }

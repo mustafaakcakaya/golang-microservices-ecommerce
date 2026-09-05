@@ -9,9 +9,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// ShoppingCart is one user's basket. The user name is the identity, as it is
-// in the .NET service where Marten is configured with UserName as the document
-// identity - a user has exactly one basket.
+// ShoppingCart is one user's basket. The user name is the identity: a user has
+// exactly one basket, and storing replaces it.
 type ShoppingCart struct {
 	UserName string             `json:"userName" validate:"required"`
 	Items    []ShoppingCartItem `json:"items"`
@@ -28,9 +27,8 @@ type ShoppingCartItem struct {
 
 // TotalPrice sums the lines.
 //
-// The .NET model exposes this as a computed property, so it is serialized but
-// never stored. Keeping it a method here has the same effect for persistence;
-// MarshalJSON adds it to the wire format so clients still see the field.
+// It is derived rather than stored, so it can never drift from the lines it
+// sums. MarshalJSON adds it to the wire format so clients still see the field.
 func (c ShoppingCart) TotalPrice() decimal.Decimal {
 	total := decimal.Zero
 	for _, item := range c.Items {
@@ -39,8 +37,8 @@ func (c ShoppingCart) TotalPrice() decimal.Decimal {
 	return total
 }
 
-// MarshalJSON emits totalPrice alongside the stored fields, matching the .NET
-// response shape without letting the derived value into the database.
+// MarshalJSON emits totalPrice alongside the stored fields, without letting the
+// derived value into the database.
 func (c ShoppingCart) MarshalJSON() ([]byte, error) {
 	type cart ShoppingCart // alias avoids recursing into this method
 
@@ -51,8 +49,7 @@ func (c ShoppingCart) MarshalJSON() ([]byte, error) {
 }
 
 // Repository stores baskets. GetByUserName reports apperr.NotFound when the
-// user has no basket, which the HTTP layer turns into a 404 - the counterpart
-// of the .NET BasketNotFoundException.
+// user has no basket, which the HTTP layer turns into a 404.
 type Repository interface {
 	GetByUserName(ctx context.Context, userName string) (ShoppingCart, error)
 	Store(ctx context.Context, cart ShoppingCart) error

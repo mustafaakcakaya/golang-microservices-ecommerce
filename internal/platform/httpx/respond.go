@@ -11,9 +11,8 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/apperr"
 )
 
-// Problem is an RFC 7807 problem details body, the same shape the .NET
-// CustomExceptionHandler produces so clients see one error format across
-// both implementations.
+// Problem is an RFC 7807 problem details body, so every service reports errors
+// in one format.
 type Problem struct {
 	Title   string            `json:"title"`
 	Detail  string            `json:"detail"`

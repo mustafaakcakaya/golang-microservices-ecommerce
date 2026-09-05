@@ -1,11 +1,10 @@
 // Package apperr classifies errors so the transport layer can map them to a
 // status code in one place.
 //
-// The .NET project throws NotFoundException, BadRequestException and
-// InternalServerException, and CustomExceptionHandler turns them into
-// ProblemDetails. Go has no exceptions, so the classification travels in the
-// error value itself: handlers return an *Error, and the HTTP layer inspects
-// its Kind. Everything else - a driver error, a bug - is treated as internal.
+// The classification travels in the error value itself: handlers return an
+// *Error and the transport layer inspects its Kind. Anything unclassified - a
+// driver error, a bug - is treated as internal, so a leak errs towards 500
+// rather than towards telling the caller their input was at fault.
 package apperr
 
 import (
@@ -61,8 +60,8 @@ func (e *Error) Error() string {
 // Unwrap exposes the cause to errors.Is and errors.As.
 func (e *Error) Unwrap() error { return e.cause }
 
-// NotFound reports a missing entity. Mirrors the .NET NotFoundException
-// constructor that formats the entity name and key.
+// NotFound reports a missing entity, naming both the entity and the key that
+// was looked up.
 func NotFound(entity string, key any) *Error {
 	return &Error{
 		Kind:    KindNotFound,

@@ -11,8 +11,7 @@ import (
 )
 
 // GetProductsQuery pages through the catalog. PageNumber is 1-based on the
-// wire, as in the .NET endpoint; it is converted to the zero-based
-// pagination.Request internally.
+// wire and converted to the zero-based pagination.Request internally.
 type GetProductsQuery struct {
 	PageNumber int
 	PageSize   int
@@ -38,7 +37,7 @@ func (h *GetProductsHandler) Handle(ctx context.Context, q GetProductsQuery) (Ge
 	page := pagination.Request{PageIndex: q.PageNumber - 1, PageSize: q.PageSize}
 
 	// The count is part of the repository contract for paged results; this
-	// endpoint, like its .NET counterpart, exposes only the items.
+	// endpoint exposes only the items.
 	items, _, err := h.repo.List(ctx, page)
 	if err != nil {
 		return GetProductsResult{}, err
@@ -47,7 +46,7 @@ func (h *GetProductsHandler) Handle(ctx context.Context, q GetProductsQuery) (Ge
 	return GetProductsResult{Products: items}, nil
 }
 
-// getProductsResponse mirrors the .NET GetProductsResponse shape.
+// getProductsResponse is the wire shape of a list call.
 type getProductsResponse struct {
 	Products []Product `json:"products"`
 }
