@@ -1,0 +1,110 @@
+# Local stack:
+#
+#   docker compose -f deploy/compose.yaml up --build
+#
+# Host ports are deliberately offset from the .NET project's compose file, so
+# both stacks can run at the same time and be compared. Each is overridable if
+# something else already holds the port:
+#
+#   .NET        Go (here)
+#   5432   ->   5442   catalog database
+#   5433   ->   5443   basket database
+#   6379   ->   6389   redis
+#   6000   ->   6100   catalog service
+#   6001   ->   6101   basket service
+#
+# Credentials below are local-only defaults; nothing here is meant for a
+# deployed environment.
+
+services:
+  catalogdb:
+    image: postgres:16-alpine
+    container_name: go-catalogdb
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=catalog
+    restart: always
+    ports:
+      - "${CATALOG_DB_PORT:-5442}:5432"
+    volumes:
+      - postgres_catalog:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d catalog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  basketdb:
+    image: postgres:16-alpine
+    container_name: go-basketdb
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=basket
+    restart: always
+    ports:
+      - "${BASKET_DB_PORT:-5443}:5432"
+    volumes:
+      - postgres_basket:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d basket"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  distributedcache:
+    image: redis:7-alpine
+    container_name: go-distributedcache
+    restart: always
+    ports:
+      - "${REDIS_PORT:-6389}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  catalog:
+    container_name: go-catalog
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        SERVICE: catalog
+    environment:
+      - CATALOG_HTTP_ADDR=:8080
+      - CATALOG_DATABASE_URL=postgres://postgres:postgres@catalogdb:5432/catalog?sslmode=disable
+      - CATALOG_SEED=true
+    depends_on:
+      catalogdb:
+        # The service migrates on startup, so it must not race the database.
+        condition: service_healthy
+    ports:
+      - "${CATALOG_PORT:-6100}:8080"
+
+  basket:
+    container_name: go-basket
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        SERVICE: basket
+    environment:
+      - BASKET_HTTP_ADDR=:8080
+      - BASKET_DATABASE_URL=postgres://postgres:postgres@basketdb:5432/basket?sslmode=disable
+      - BASKET_REDIS_URL=redis://distributedcache:6379/0
+    depends_on:
+      basketdb:
+        condition: service_healthy
+      distributedcache:
+        condition: service_healthy
+    ports:
+      - "${BASKET_PORT:-6101}:8080"
+
+volumes:
+  postgres_catalog:
+  postgres_basket:
+  redis_data:
