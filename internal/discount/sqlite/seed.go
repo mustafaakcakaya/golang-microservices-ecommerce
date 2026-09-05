@@ -10,12 +10,9 @@ import (
 
 // Seed inserts the sample coupons when the table is empty.
 //
-// The product names come from the .NET DiscountContext.OnModelCreating seed and
-// are kept byte-identical, including "Iphone X" - note the lower-case p, which
-// does NOT match the "iPhone X" the Catalog service seeds. Discounts are looked
-// up by exact product name, so that coupon never applies in practice. The
-// mismatch is carried rather than quietly fixed here, so both projects stay in
-// step and the bug is fixed in one place once decided.
+// Product names must match the Catalog spelling exactly: discounts are looked
+// up by name, so a coupon whose name differs by a single letter silently never
+// applies. "iPhone X" is the spelling Catalog seeds.
 func Seed(ctx context.Context, db *sql.DB) (int, error) {
 	var existing int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM coupons`).Scan(&existing); err != nil {
@@ -37,7 +34,7 @@ func Seed(ctx context.Context, db *sql.DB) (int, error) {
 
 func sampleCoupons() []coupons.Coupon {
 	return []coupons.Coupon{
-		{ProductName: "Iphone X", Description: "Iphone discount", Amount: 150},
+		{ProductName: "iPhone X", Description: "iPhone discount", Amount: 150},
 		{ProductName: "Samsung 10", Description: "Samsung discount", Amount: 100},
 	}
 }

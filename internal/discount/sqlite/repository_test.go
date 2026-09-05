@@ -35,7 +35,7 @@ func TestCreateAssignsIDAndRoundTrips(t *testing.T) {
 	repo, _ := newRepository(t)
 
 	created, err := repo.Create(t.Context(), coupons.Coupon{
-		ProductName: "iPhone X", Description: "Iphone discount", Amount: 150,
+		ProductName: "iPhone X", Description: "iPhone discount", Amount: 150,
 	})
 	if err != nil {
 		t.Fatalf("creating: %v", err)
@@ -48,7 +48,7 @@ func TestCreateAssignsIDAndRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading: %v", err)
 	}
-	if got.Amount != 150 || got.Description != "Iphone discount" || got.ID != created.ID {
+	if got.Amount != 150 || got.Description != "iPhone discount" || got.ID != created.ID {
 		t.Errorf("coupon = %+v, want the stored values", got)
 	}
 }
@@ -140,8 +140,8 @@ func TestDeleteRemovesCouponAndReportsMissingOnes(t *testing.T) {
 		t.Fatalf("deleting: %v", err)
 	}
 
-	// Unlike Basket, deleting a missing coupon is an error here - the .NET
-	// service raises NotFound for it.
+	// Unlike Basket, deleting a missing coupon is an error here: the caller
+	// asked to remove something specific that was not there.
 	err := repo.Delete(t.Context(), "iPhone X")
 	if got := apperr.KindOf(err); got != apperr.KindNotFound {
 		t.Errorf("second delete kind = %v, want KindNotFound (error %v)", got, err)
@@ -178,7 +178,7 @@ func TestSeedIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestSeedCarriesTheProductNameMismatchFromDotnet(t *testing.T) {
+func TestSeedProductNamesMatchTheCatalogSpelling(t *testing.T) {
 	t.Parallel()
 
 	repo, db := newRepository(t)
@@ -186,14 +186,12 @@ func TestSeedCarriesTheProductNameMismatchFromDotnet(t *testing.T) {
 		t.Fatalf("seeding: %v", err)
 	}
 
-	// The .NET seed writes "Iphone X" while Catalog seeds "iPhone X", so the
-	// coupon never matches a real product. The port keeps the data identical
-	// rather than fixing it on one side only; this test documents the defect
-	// and will fail once both projects are corrected together.
-	if _, err := repo.ByProductName(t.Context(), "Iphone X"); err != nil {
-		t.Errorf("seeded name changed: %v", err)
-	}
-	if _, err := repo.ByProductName(t.Context(), "iPhone X"); apperr.KindOf(err) != apperr.KindNotFound {
-		t.Errorf("catalog's spelling now matches; update the seed on both sides and drop this test")
+	// Discounts are looked up by exact product name, so a coupon whose spelling
+	// differs from the catalog's by one letter silently never applies. These
+	// are the names the Catalog service seeds.
+	for _, productName := range []string{"iPhone X", "Samsung 10"} {
+		if _, err := repo.ByProductName(t.Context(), productName); err != nil {
+			t.Errorf("no coupon for %q, which the catalog seeds: %v", productName, err)
+		}
 	}
 }
