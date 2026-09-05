@@ -40,9 +40,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # v7 or newer is required: earlier action releases only install
+      # golangci-lint v1, which cannot read the v2 config format used here.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
-          # Pinned: the config is in v2 format, which v1 cannot read, and an
-          # unpinned "latest" would silently change what CI enforces.
+          # Pinned: an unpinned "latest" would silently change what CI enforces.
           version: v2.13.2
