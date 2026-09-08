@@ -73,8 +73,12 @@ func (r *Reader) Read(ctx context.Context, after LSN, batchSize int) (Batch, err
 	}
 
 	if maxLSN.IsZero() {
+		// Enabling capture is not the same as capture having run: the server
+		// has no position to report until its capture job has processed the
+		// log at least once.
 		return Batch{}, &NotReadyError{
-			Reason: "the database reports no maximum LSN, so change data capture is not enabled on it",
+			Reason: "the server reports no maximum LSN yet; either capture is not enabled on this " +
+				"database or its capture job has not recorded a position (is SQL Server Agent running?)",
 		}
 	}
 	if minLSN.IsZero() {
