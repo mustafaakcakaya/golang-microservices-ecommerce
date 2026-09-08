@@ -20,19 +20,19 @@ linters:
             - '**/internal/ordering/domain/**'
           deny:
             - pkg: database/sql
-              desc: domain katmanı kalıcılık bilmez; repository arayüzü app/infra katmanında
+              desc: the domain knows nothing about persistence; the repository interface lives in the application layer
             - pkg: github.com/microsoft/go-mssqldb
-              desc: domain katmanı veritabanı sürücüsü tanımaz
+              desc: the domain does not know database drivers
             - pkg: github.com/jackc/pgx
-              desc: domain katmanı veritabanı sürücüsü tanımaz
+              desc: the domain does not know database drivers
             - pkg: net/http
-              desc: domain katmanı taşıma katmanı bilmez
+              desc: the domain does not know the transport layer
             - pkg: github.com/go-chi/chi
-              desc: domain katmanı taşıma katmanı bilmez
+              desc: the domain does not know the transport layer
             - pkg: github.com/segmentio/kafka-go
-              desc: domain katmanı message broker tanımaz
+              desc: the domain does not know message brokers
             - pkg: github.com/rabbitmq/amqp091-go
-              desc: domain katmanı message broker tanımaz
+              desc: the domain does not know message brokers
     errcheck:
       check-type-assertions: true
     revive:
