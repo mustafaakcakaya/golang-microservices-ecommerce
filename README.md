@@ -10,7 +10,7 @@ verisine sahiptir ve problemine uygun kalıcılık teknolojisini kullanır.
 | Catalog | Ürün kataloğu | PostgreSQL | hazır |
 | Basket | Alışveriş sepeti | PostgreSQL + Redis | hazır |
 | Discount | İndirim kuponları | SQLite (gRPC) | hazır |
-| Ordering | Sipariş yaşam döngüsü | SQL Server | planlandı |
+| Ordering | Sipariş yaşam döngüsü | SQL Server | REST hazır, outbox planlandı |
 | ordering-worker | Outbox mesajlarını yayınlar | — | planlandı |
 
 ## Mimari yaklaşımlar
@@ -27,6 +27,9 @@ verisine sahiptir ve problemine uygun kalıcılık teknolojisini kullanır.
 - **Domain event ↔ integration event ayrımı**: domain event içeride kalır, dışarıya yalnızca
   versiyonlanmış integration event çıkar. Hassas ödeme verisi (kart numarası, CVV) outbox'a,
   loglara veya broker'a hiç girmez.
+- **Yazma ve okuma şekilleri ayrıdır**: komut kartı alır, görüntü asla geri vermez. Ödeme
+  tipleri hem `fmt` hem JSON gösteriminde kendini maskeler, böylece bir log satırına ya da
+  yanıt gövdesine kaza ile kart numarası düşmez.
 - **at-least-once teslimat + consumer inbox idempotency**: broker message id üzerinden
   tekrarlar elenir.
 
@@ -39,8 +42,9 @@ internal/
   catalog/  basket/  discount/
   ordering/
     domain/    aggregate, value object, domain event — dış bağımlılık yok
-    app/       command/query handler, dto, integration event mapper
-    infra/     kalıcılık, migration, outbox, cdc reader, checkpoint store
+    orders/    komut/sorgu handler'ları, istek ve görüntü sözleşmeleri, HTTP route'lar
+    mssql/     kalıcılık, migration, seed — ileride outbox ve CDC reader
+    api/       router
 proto/         servisler arası gRPC sözleşmeleri
 deploy/        compose ve dağıtım tanımları
 ```
@@ -54,8 +58,9 @@ pinleme yükü bu aşamada karşılığını vermez.
 docker compose -f deploy/compose.yaml up --build
 ```
 
-Servis adresleri: Catalog `6100`, Basket `6101`, Discount `6102` (gRPC). Portlar ortam
-değişkenleriyle değiştirilebilir; ayrıntı `deploy/compose.yaml` başındaki tabloda.
+Servis adresleri: Catalog `6100`, Basket `6101`, Discount `6102` (gRPC), Ordering `6103`.
+Portlar ortam değişkenleriyle değiştirilebilir; ayrıntı `deploy/compose.yaml` başındaki
+tabloda.
 
 Bağımlılıklar bilinçli olarak zorunludur: Basket, Redis veya Discount olmadan başlamaz. Eksik
 bir cache sessizce yavaşlığa, eksik bir indirim servisi ise sessizce yanlış fiyata yol açardı —
@@ -73,5 +78,5 @@ make proto     # .proto dosyalarından Go kodunu yeniden üret (buf gerekir)
 Go 1.26+ gerekir. Üretilmiş protobuf kodu depoya dahildir, dolayısıyla derlemek için protobuf
 araç zincirine ihtiyaç yoktur.
 
-Integration testleri Testcontainers ile gerçek PostgreSQL ve Redis ayağa kaldırır; Docker
-gerektirmeyen hızlı paket için `go test -short ./...` kullanın.
+Integration testleri Testcontainers ile gerçek PostgreSQL, Redis ve SQL Server ayağa
+kaldırır; Docker gerektirmeyen hızlı paket için `go test -short ./...` kullanın.

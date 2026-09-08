@@ -69,6 +69,17 @@ func Struct(v any) error {
 	return apperr.Validation(fields)
 }
 
+// isCollection reports whether a length rule is counting entries rather than
+// characters, so a list is not told it needs to be longer in characters.
+func isCollection(err validator.FieldError) bool {
+	switch err.Kind() {
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return true
+	default:
+		return false
+	}
+}
+
 // message renders a rule failure in prose ("Name is required") rather than
 // exposing raw tag names to the caller.
 func message(err validator.FieldError) string {
@@ -78,8 +89,14 @@ func message(err validator.FieldError) string {
 	case "required":
 		return fmt.Sprintf("%s is required", name)
 	case "min":
+		if isCollection(err) {
+			return fmt.Sprintf("%s must have at least %s item(s)", name, err.Param())
+		}
 		return fmt.Sprintf("%s must be at least %s characters", name, err.Param())
 	case "max":
+		if isCollection(err) {
+			return fmt.Sprintf("%s must have at most %s item(s)", name, err.Param())
+		}
 		return fmt.Sprintf("%s must be at most %s characters", name, err.Param())
 	case "gt":
 		return fmt.Sprintf("%s must be greater than %s", name, err.Param())

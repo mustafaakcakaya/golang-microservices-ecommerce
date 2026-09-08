@@ -62,6 +62,8 @@ func TestMessagesReadAsProse(t *testing.T) {
 		{"min length", withName(valid(), "a"), "Name", "Name must be at least 2 characters"},
 		{"max length", withName(valid(), "abcdefghijk"), "Name", "Name must be at most 10 characters"},
 		{"greater than", withPrice(valid(), 0), "Price", "Price must be greater than 0"},
+		// A length rule on a list counts entries, not characters.
+		{"min items", withTags(valid()), "Tags", "Tags must have at least 1 item(s)"},
 	}
 
 	for _, tc := range cases {
@@ -99,5 +101,10 @@ func withName(c command, name string) command {
 
 func withPrice(c command, price int64) command {
 	c.Price = decimal.NewFromInt(price)
+	return c
+}
+
+func withTags(c command) command {
+	c.Tags = []string{}
 	return c
 }
