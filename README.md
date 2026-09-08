@@ -1,82 +1,106 @@
 # golang-microservices-ecommerce
 
-Go ile yazılmış e-ticaret mikroservis projesi. Alan dört servise bölünür; her servis kendi
-verisine sahiptir ve problemine uygun kalıcılık teknolojisini kullanır.
+An e-commerce microservices project written in Go. The domain is split across
+four services; each owns its data and uses the persistence technology its
+problem calls for.
 
-## Servisler
+## Services
 
-| Servis | Sorumluluk | Kalıcılık | Durum |
+| Service | Responsibility | Storage | Status |
 | --- | --- | --- | --- |
-| Catalog | Ürün kataloğu | PostgreSQL | hazır |
-| Basket | Alışveriş sepeti | PostgreSQL + Redis | hazır |
-| Discount | İndirim kuponları | SQLite (gRPC) | hazır |
-| Ordering | Sipariş yaşam döngüsü | SQL Server | REST hazır, outbox planlandı |
-| ordering-worker | Outbox mesajlarını yayınlar | — | planlandı |
+| Catalog | Product catalog | PostgreSQL | ready |
+| Basket | Shopping basket | PostgreSQL + Redis | ready |
+| Discount | Coupons | SQLite, over gRPC | ready |
+| Ordering | Order lifecycle | SQL Server | ready |
+| ordering-worker | Publishes outbox messages | — | ready |
 
-## Mimari yaklaşımlar
+## Architectural approaches
 
-- **Clean Architecture** (Ordering): bağımlılıklar dışarıdan içeriye. `internal/ordering/domain`
-  hiçbir altyapı paketini import etmez — bu kural linter ile zorlanır.
-- **Domain-Driven Design**: `Order` aggregate root, value object'ler, domain event'ler.
-- **CQRS**: komut ve sorgular ayrı handler'lar; kesişen ilgiler middleware zinciriyle eklenir.
-  Dispatcher yoktur, handler'lar `main` içinde açıkça bağlanır.
-- **Vertical slice**: her özellik kendi dosyasında isteği, handler'ı ve HTTP route'uyla birlikte
-  durur; bir davranış tek yerden okunur ve değiştirilir.
-- **Transactional Outbox + CDC**: aggregate değişikliği ile yayınlanacak mesaj aynı SQL
-  transaction'ında yazılır; ayrı bir worker SQL Server CDC üzerinden okuyup broker'a yayınlar.
-- **Domain event ↔ integration event ayrımı**: domain event içeride kalır, dışarıya yalnızca
-  versiyonlanmış integration event çıkar. Hassas ödeme verisi (kart numarası, CVV) outbox'a,
-  loglara veya broker'a hiç girmez.
-- **Yazma ve okuma şekilleri ayrıdır**: komut kartı alır, görüntü asla geri vermez. Ödeme
-  tipleri hem `fmt` hem JSON gösteriminde kendini maskeler, böylece bir log satırına ya da
-  yanıt gövdesine kaza ile kart numarası düşmez.
-- **at-least-once teslimat + consumer inbox idempotency**: broker message id üzerinden
-  tekrarlar elenir.
+- **Clean Architecture** (Ordering): dependencies point inwards.
+  `internal/ordering/domain` imports no infrastructure package, and the linter
+  enforces that rather than leaving it to good intentions.
+- **Domain-Driven Design**: `Order` is an aggregate root, with value objects and
+  domain events.
+- **CQRS**: commands and queries are separate handlers, with cross-cutting
+  concerns added as middleware. There is no dispatcher; handlers are wired
+  explicitly in `main`.
+- **Vertical slices**: each feature keeps its request, handler and HTTP route in
+  one file, so a behaviour is read and changed in one place.
+- **Transactional outbox + change data capture**: the aggregate change and the
+  message announcing it are written in the same SQL transaction; a separate
+  worker reads them through SQL Server's change tables and publishes them.
+- **Domain events are not integration events**: domain events stay inside the
+  service, and only explicit versioned contracts leave it. Payment data - card
+  numbers, security codes - never reaches the outbox, a log or the broker.
+- **At-least-once delivery with consumer-side deduplication**: repeats are
+  recognised by the broker message id.
+- **Write and read shapes are separate**: a command accepts a card, a view never
+  returns one. The payment types redact themselves in both their `fmt` and JSON
+  representations, so neither a log line nor a response body can carry a card
+  number by accident.
 
-## Dizin yapısı
+See [docs/architecture.md](docs/architecture.md) for why the outbox exists and
+what the delivery guarantees actually are, and
+[docs/ordering-worker-runbook.md](docs/ordering-worker-runbook.md) for operating
+the worker.
+
+## Layout
 
 ```
-cmd/           her servis için bir main paketi
+cmd/           one main package per service
 internal/
-  platform/    servisler arası ortak kod (cqrs, apperr, pagination, validation, httpx, health)
+  platform/    shared code (cqrs, apperr, pagination, validation, httpx, health)
   catalog/  basket/  discount/
   ordering/
-    domain/    aggregate, value object, domain event — dış bağımlılık yok
-    orders/    komut/sorgu handler'ları, istek ve görüntü sözleşmeleri, HTTP route'lar
-    mssql/     kalıcılık, migration, seed — ileride outbox ve CDC reader
-    api/       router
-proto/         servisler arası gRPC sözleşmeleri
-deploy/        compose ve dağıtım tanımları
+    domain/       aggregate, value objects, domain events - no outside dependencies
+    orders/       command and query handlers, request and view contracts, routes
+    mssql/        persistence, migrations, outbox writes, inbox store
+    integration/  domain events mapped to published contracts
+    outbox/       capture reader, checkpoint, retry and poison handling
+    api/          router
+  platform/messaging/   contracts, envelope, publishers, broker switch, inbox
+proto/         gRPC contracts between services
+deploy/        compose and deployment definitions
 ```
 
-Tek `go.mod` kullanılır: servisler birlikte geliştirilip deploy edilir, çoklu modülün sürüm
-pinleme yükü bu aşamada karşılığını vermez.
+A single `go.mod` is used: the services are developed and deployed together, and
+the version-pinning overhead of multiple modules would not pay for itself at
+this stage.
 
-## Çalıştırma
+## Running
 
 ```bash
 docker compose -f deploy/compose.yaml up --build
 ```
 
-Servis adresleri: Catalog `6100`, Basket `6101`, Discount `6102` (gRPC), Ordering `6103`.
-Portlar ortam değişkenleriyle değiştirilebilir; ayrıntı `deploy/compose.yaml` başındaki
-tabloda.
+Service addresses: Catalog `6100`, Basket `6101`, Discount `6102` (gRPC),
+Ordering `6103`, ordering-worker `6104` (health only). RabbitMQ's management UI
+is on `15682`. Ports can be changed with environment variables; see the table at
+the top of `deploy/compose.yaml`.
 
-Bağımlılıklar bilinçli olarak zorunludur: Basket, Redis veya Discount olmadan başlamaz. Eksik
-bir cache sessizce yavaşlığa, eksik bir indirim servisi ise sessizce yanlış fiyata yol açardı —
-ikisi de deploy'dan çok sonra fark edilirdi.
-
-## Geliştirme
+To run against Kafka instead:
 
 ```bash
-make build     # tüm paketleri derle
-make test      # testleri çalıştır (yarış tespiti açık)
-make lint      # golangci-lint
-make proto     # .proto dosyalarından Go kodunu yeniden üret (buf gerekir)
+MESSAGE_BROKER_PROVIDER=kafka docker compose -f deploy/compose.yaml --profile kafka up --build
 ```
 
-Go 1.26+ gerekir. Üretilmiş protobuf kodu depoya dahildir, dolayısıyla derlemek için protobuf
-araç zincirine ihtiyaç yoktur.
+Dependencies are deliberately required rather than optional: Basket will not
+start without Redis or Discount. A missing cache would quietly become slowness
+and a missing discount service would quietly become the wrong price - both of
+which are noticed long after a deploy.
 
-Integration testleri Testcontainers ile gerçek PostgreSQL, Redis ve SQL Server ayağa
-kaldırır; Docker gerektirmeyen hızlı paket için `go test -short ./...` kullanın.
+## Development
+
+```bash
+make build     # compile every package
+make test      # run the tests with the race detector
+make lint      # golangci-lint
+make proto     # regenerate Go code from the .proto files (needs buf)
+```
+
+Go 1.26+ is required. Generated protobuf code is committed, so building does not
+need the protobuf toolchain.
+
+Integration tests bring up real PostgreSQL, Redis, SQL Server, RabbitMQ and
+Kafka instances with Testcontainers. For the fast subset that needs no Docker,
+use `go test -short ./...`.
