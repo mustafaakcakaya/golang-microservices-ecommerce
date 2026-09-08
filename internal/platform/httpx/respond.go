@@ -66,3 +66,11 @@ func statusFor(kind apperr.Kind) int {
 		return http.StatusInternalServerError
 	}
 }
+
+// CorrelationID returns the id this request is known by, or an empty string
+// outside a request. It is the same value error responses report as their trace
+// id, so a log line, a problem response and a published message can be lined up
+// after the fact.
+func CorrelationID(ctx context.Context) string {
+	return middleware.GetReqID(ctx)
+}

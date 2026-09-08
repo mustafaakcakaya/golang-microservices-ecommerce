@@ -47,7 +47,8 @@ func Seed(ctx context.Context, db *sql.DB) (int, error) {
 		return 0, err
 	}
 
-	repo := NewOrderRepository(db)
+	// Seeding maps no events: see DropEvents.
+	repo := NewOrderRepository(db, DropEvents)
 	for _, order := range orders {
 		if err := repo.Save(ctx, order); err != nil {
 			return 0, fmt.Errorf("seeding order %s: %w", order.OrderName, err)
@@ -119,10 +120,6 @@ func sampleOrders(customers []*domain.Customer, products []*domain.Product) ([]*
 	if err := order.Add(products[1].ID, 1, products[1].Price); err != nil {
 		return nil, err
 	}
-
-	// The events raised while building the sample are dropped: seeding is not a
-	// business change and must not publish OrderCreated to other services.
-	order.PullEvents()
 
 	return []*domain.Order{order}, nil
 }

@@ -22,17 +22,20 @@ import (
 // incomplete one. The outbox row will join the same transaction later, which is
 // what makes publishing atomic with the change it describes.
 type OrderRepository struct {
-	db *sql.DB
+	db       *sql.DB
+	mapEvent EventMapper
 }
 
-// NewOrderRepository wires the repository.
-func NewOrderRepository(db *sql.DB) *OrderRepository {
-	return &OrderRepository{db: db}
+// NewOrderRepository wires the repository. The mapper decides which domain
+// events become outbox messages; see EventMapper.
+func NewOrderRepository(db *sql.DB, mapEvent EventMapper) *OrderRepository {
+	return &OrderRepository{db: db, mapEvent: mapEvent}
 }
 
-// Save inserts or replaces an order together with its lines.
+// Save inserts or replaces an order together with its lines and the outbox
+// messages its changes produced.
 func (r *OrderRepository) Save(ctx context.Context, order *domain.Order) error {
-	return r.inTx(ctx, func(tx *sql.Tx) error {
+	err := r.inTx(ctx, func(tx *sql.Tx) error {
 		if err := upsertOrder(ctx, tx, order); err != nil {
 			return err
 		}
@@ -50,8 +53,18 @@ func (r *OrderRepository) Save(ctx context.Context, order *domain.Order) error {
 			}
 		}
 
-		return nil
+		return r.stageEvents(ctx, tx, order.Events())
 	})
+	if err != nil {
+		return err
+	}
+
+	// The events are dropped only once they are committed. Clearing them before
+	// the commit would lose them on a rollback, leaving an order that was saved
+	// on a later attempt but never announced.
+	order.PullEvents()
+
+	return nil
 }
 
 // ByID loads one order with its lines.

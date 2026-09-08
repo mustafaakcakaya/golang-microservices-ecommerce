@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/api"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/integration"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/mssql"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/health"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/httpx"
@@ -73,7 +74,7 @@ func run(log *slog.Logger) error {
 	checks := health.NewRegistry()
 	checks.Register("sqlserver", db.PingContext)
 
-	repo := mssql.NewOrderRepository(db)
+	repo := mssql.NewOrderRepository(db, integration.Map)
 
 	return httpx.Run(ctx, addr, api.Router(repo, checks, log), log)
 }

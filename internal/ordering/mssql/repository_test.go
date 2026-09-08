@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/domain"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/integration"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/mssql"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/apperr"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/pagination"
@@ -130,7 +132,7 @@ func newRepository(t *testing.T) *mssql.OrderRepository {
 		t.Skip("skipping test that needs Docker")
 	}
 
-	return mssql.NewOrderRepository(sharedDB)
+	return mssql.NewOrderRepository(sharedDB, integration.Map)
 }
 
 // seedCustomer inserts a customer so orders have something to reference.
@@ -452,6 +454,149 @@ func TestDeleteRemovesTheOrderAndItsLines(t *testing.T) {
 	// remove something specific that was not there.
 	if err := repo.Delete(t.Context(), order.ID); apperr.KindOf(err) != apperr.KindNotFound {
 		t.Errorf("second delete = %v, want NotFound", err)
+	}
+}
+
+// outboxRow is one stored message, read back to prove what was committed.
+type outboxRow struct {
+	eventType     string
+	schemaVersion int
+	aggregateID   string
+	payload       string
+}
+
+func outboxFor(t *testing.T, orderID domain.OrderID) []outboxRow {
+	t.Helper()
+
+	rows, err := sharedDB.QueryContext(t.Context(), `
+		SELECT EventType, SchemaVersion, AggregateId, Payload
+		FROM OutboxMessages WHERE AggregateId = @p1 ORDER BY OccurredOnUtc, EventType`,
+		orderID.String())
+	if err != nil {
+		t.Fatalf("reading outbox: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var found []outboxRow
+	for rows.Next() {
+		var row outboxRow
+		if err := rows.Scan(&row.eventType, &row.schemaVersion, &row.aggregateID, &row.payload); err != nil {
+			t.Fatalf("scanning outbox: %v", err)
+		}
+		found = append(found, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("reading outbox: %v", err)
+	}
+
+	return found
+}
+
+func TestSavingAnOrderCommitsItsOutboxMessageWithIt(t *testing.T) {
+	repo := newRepository(t)
+	db := sharedDB
+
+	customerID := seedCustomer(t, db)
+	productID := seedProduct(t, db)
+
+	order := newOrder(t, customerID, "ORD_B")
+	if err := order.Add(productID, 2, decimal.NewFromInt(250)); err != nil {
+		t.Fatalf("adding line: %v", err)
+	}
+
+	if err := repo.Save(t.Context(), order); err != nil {
+		t.Fatalf("saving: %v", err)
+	}
+
+	messages := outboxFor(t, order.ID)
+	if len(messages) != 1 {
+		t.Fatalf("outbox rows = %d, want the single OrderCreated", len(messages))
+	}
+	if messages[0].eventType != "ordering.order-created" || messages[0].schemaVersion != 1 {
+		t.Errorf("contract = %s v%d, want ordering.order-created v1",
+			messages[0].eventType, messages[0].schemaVersion)
+	}
+	// The payload is a contract, not the aggregate: nothing a consumer has no
+	// business knowing may reach the broker through it.
+	for _, secret := range []string{cardNumber, cvv, "Test Address"} {
+		if strings.Contains(messages[0].payload, secret) {
+			t.Errorf("the outbox payload leaked %q: %s", secret, messages[0].payload)
+		}
+	}
+	if !strings.Contains(messages[0].payload, `"totalPrice":"500"`) {
+		t.Errorf("payload = %s, want the derived total", messages[0].payload)
+	}
+
+	// The events are consumed by the save, so a second save cannot announce
+	// the same change twice.
+	if len(order.Events()) != 0 {
+		t.Errorf("events = %d, want them cleared once committed", len(order.Events()))
+	}
+}
+
+func TestAFailedSaveLeavesNoOutboxMessage(t *testing.T) {
+	repo := newRepository(t)
+
+	customerID := seedCustomer(t, sharedDB)
+	unknownProduct, err := domain.NewProductID(uuid.New())
+	if err != nil {
+		t.Fatalf("product id: %v", err)
+	}
+
+	order := newOrder(t, customerID, "ORD_C")
+	if err := order.Add(unknownProduct, 1, decimal.NewFromInt(10)); err != nil {
+		t.Fatalf("adding line: %v", err)
+	}
+
+	if err := repo.Save(t.Context(), order); err == nil {
+		t.Fatal("saving a line for an unknown product should fail")
+	}
+
+	// This is the guarantee the outbox exists for: no message survives a
+	// change that did not.
+	if messages := outboxFor(t, order.ID); len(messages) != 0 {
+		t.Errorf("outbox rows = %d, want none for a rolled-back save", len(messages))
+	}
+	// The events stay on the aggregate, so a retry still announces the change.
+	if len(order.Events()) != 1 {
+		t.Errorf("events = %d, want OrderCreated still pending", len(order.Events()))
+	}
+}
+
+func TestUpdatingAnOrderAppendsAnUpdateMessage(t *testing.T) {
+	repo := newRepository(t)
+	db := sharedDB
+
+	customerID := seedCustomer(t, db)
+	productID := seedProduct(t, db)
+
+	order := newOrder(t, customerID, "ORD_U")
+	if err := order.Add(productID, 1, decimal.NewFromInt(100)); err != nil {
+		t.Fatalf("adding line: %v", err)
+	}
+	if err := repo.Save(t.Context(), order); err != nil {
+		t.Fatalf("saving: %v", err)
+	}
+
+	name, err := domain.NewOrderName("ORD_V")
+	if err != nil {
+		t.Fatalf("order name: %v", err)
+	}
+	if err := order.Update(name, order.ShippingAddress, order.BillingAddress,
+		order.Payment, domain.OrderStatusCompleted); err != nil {
+		t.Fatalf("updating: %v", err)
+	}
+	if err := repo.Save(t.Context(), order); err != nil {
+		t.Fatalf("re-saving: %v", err)
+	}
+
+	// The outbox is append-only, so the history of what was announced stays.
+	messages := outboxFor(t, order.ID)
+	if len(messages) != 2 {
+		t.Fatalf("outbox rows = %d, want the create and the update", len(messages))
+	}
+	if messages[1].eventType != "ordering.order-updated" {
+		t.Errorf("second contract = %s, want ordering.order-updated", messages[1].eventType)
 	}
 }
 
