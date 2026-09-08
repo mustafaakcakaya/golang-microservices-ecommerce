@@ -81,6 +81,11 @@ func run(ctx context.Context, container *tcmssql.MSSQLServerContainer, m *testin
 	}
 	defer func() { _ = db.Close() }()
 
+	if err := waitForLogin(ctx, db); err != nil {
+		fmt.Fprintf(os.Stderr, "waiting for sql server: %v\n", err)
+		return 1
+	}
+
 	if err := mssql.Migrate(ctx, db); err != nil {
 		fmt.Fprintf(os.Stderr, "migrating: %v\n", err)
 		return 1
@@ -89,6 +94,33 @@ func run(ctx context.Context, container *tcmssql.MSSQLServerContainer, m *testin
 	sharedDB = db
 
 	return m.Run()
+}
+
+// waitForLogin polls until the server accepts a connection.
+//
+// The readiness log line is printed before the sa password has been applied, so
+// connecting as soon as it appears intermittently fails with "Login failed for
+// user \'sa\'" (18456). Retrying is the only reliable signal.
+func waitForLogin(ctx context.Context, db *sql.DB) error {
+	const (
+		attempts = 60
+		interval = time.Second
+	)
+
+	var err error
+	for range attempts {
+		if err = db.PingContext(ctx); err == nil {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+
+	return err
 }
 
 func newRepository(t *testing.T) *mssql.OrderRepository {
@@ -353,6 +385,37 @@ func TestByNameAndByCustomerFilter(t *testing.T) {
 	}
 	if len(byCustomer) != 1 || byCustomer[0].CustomerID != mine {
 		t.Errorf("by customer returned %d orders, want only this customer's", len(byCustomer))
+	}
+}
+
+func TestByNameSearchesAndTreatsWildcardsLiterally(t *testing.T) {
+	repo := newRepository(t)
+
+	customer := seedCustomer(t, sharedDB)
+	for _, name := range []string{"Q1_AA", "Q1_%B"} {
+		if err := repo.Save(t.Context(), newOrder(t, customer, name)); err != nil {
+			t.Fatalf("saving %s: %v", name, err)
+		}
+	}
+
+	// The endpoint is a search: part of a name finds every order carrying it.
+	partial, err := repo.ByName(t.Context(), "Q1_")
+	if err != nil {
+		t.Fatalf("by name: %v", err)
+	}
+	if len(partial) != 2 {
+		t.Errorf("searching Q1_ returned %d orders, want both", len(partial))
+	}
+
+	// A percent sign is a LIKE wildcard. Unescaped it would match every order
+	// in the table; escaped it means itself, so only the name containing one
+	// comes back.
+	literal, err := repo.ByName(t.Context(), "%")
+	if err != nil {
+		t.Fatalf("by name: %v", err)
+	}
+	if len(literal) != 1 || literal[0].OrderName.String() != "Q1_%B" {
+		t.Fatalf("searching %% returned %d orders, want only the one named with one", len(literal))
 	}
 }
 

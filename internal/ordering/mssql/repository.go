@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	mssql "github.com/microsoft/go-mssqldb"
 	"github.com/shopspring/decimal"
@@ -101,9 +102,15 @@ func (r *OrderRepository) List(ctx context.Context, page pagination.Request) ([]
 	return orders, total, nil
 }
 
-// ByName returns every order whose name matches.
+// ByName returns every order whose name contains the search term.
+//
+// It is a search rather than a lookup: order names are short references, and
+// asking for "ORD" should find ORD_1 and ORD_2.
 func (r *OrderRepository) ByName(ctx context.Context, name string) ([]*domain.Order, error) {
-	rows, err := r.db.QueryContext(ctx, selectOrders+` WHERE OrderName = @p1 ORDER BY CreatedAt DESC`, name)
+	rows, err := r.db.QueryContext(ctx, selectOrders+`
+		WHERE OrderName LIKE @p1 ESCAPE '\'
+		ORDER BY CreatedAt DESC, OrderName`,
+		"%"+escapeLike(name)+"%")
 	if err != nil {
 		return nil, fmt.Errorf("listing orders named %q: %w", name, err)
 	}
@@ -114,7 +121,10 @@ func (r *OrderRepository) ByName(ctx context.Context, name string) ([]*domain.Or
 
 // ByCustomer returns every order belonging to a customer.
 func (r *OrderRepository) ByCustomer(ctx context.Context, customerID domain.CustomerID) ([]*domain.Order, error) {
-	rows, err := r.db.QueryContext(ctx, selectOrders+` WHERE CustomerId = @p1 ORDER BY CreatedAt DESC`, asGUID(customerID.UUID()))
+	rows, err := r.db.QueryContext(ctx, selectOrders+`
+		WHERE CustomerId = @p1
+		ORDER BY CreatedAt DESC, OrderName`,
+		asGUID(customerID.UUID()))
 	if err != nil {
 		return nil, fmt.Errorf("listing orders for customer %s: %w", customerID, err)
 	}
@@ -284,6 +294,23 @@ func insertOrderItem(ctx context.Context, tx *sql.Tx, orderID domain.OrderID, it
 
 	return nil
 }
+
+// escapeLike neutralises the wildcards SQL Server's LIKE understands.
+//
+// The term is already a bound parameter, so this is not about SQL injection: it
+// is that a search for "%" would otherwise match every order, and one for "_"
+// every single-character name. Escaping keeps a search term meaning itself.
+func escapeLike(value string) string {
+	return likeEscaper.Replace(value)
+}
+
+// The backslash is declared as the escape character by the queries that use it.
+var likeEscaper = strings.NewReplacer(
+	`\`, `\\`,
+	"%", `\%`,
+	"_", `\_`,
+	"[", `\[`,
+)
 
 // nullable turns an empty string into a NULL, so an absent optional value is
 // stored as absent rather than as an empty string.
