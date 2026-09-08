@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -37,6 +38,21 @@ const (
 // container down while the rest of the package still needs it.
 var sharedDB *sql.DB
 
+// databaseDSN points a connection string at another database on the same
+// server.
+func databaseDSN(dsn, name string) (string, error) {
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		return "", err
+	}
+
+	query := parsed.Query()
+	query.Set("database", name)
+	parsed.RawQuery = query.Encode()
+
+	return parsed.String(), nil
+}
+
 func TestMain(m *testing.M) {
 	flag.Parse()
 
@@ -49,6 +65,13 @@ func TestMain(m *testing.M) {
 	container, err := tcmssql.Run(ctx, "mcr.microsoft.com/mssql/server:2022-latest",
 		tcmssql.WithAcceptEULA(),
 		tcmssql.WithPassword("Str0ng!Passw0rd"),
+		testcontainers.WithEnv(map[string]string{
+			// Change data capture needs an edition that supports it, and its
+			// capture job is an Agent job: without the agent, capture is
+			// enabled and the change table simply stays empty.
+			"MSSQL_PID":           "Developer",
+			"MSSQL_AGENT_ENABLED": "true",
+		}),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("SQL Server is now ready for client connections").
 				WithStartupTimeout(5*time.Minute),
@@ -70,9 +93,35 @@ func TestMain(m *testing.M) {
 
 // run owns the database lifetime so its defers execute before os.Exit.
 func run(ctx context.Context, container *tcmssql.MSSQLServerContainer, m *testing.M) int {
-	dsn, err := container.ConnectionString(ctx)
+	adminDSN, err := container.ConnectionString(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connection string: %v\n", err)
+		return 1
+	}
+
+	admin, err := mssql.Open(adminDSN)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "opening database: %v\n", err)
+		return 1
+	}
+	if err := waitForLogin(ctx, admin); err != nil {
+		_ = admin.Close()
+		fmt.Fprintf(os.Stderr, "waiting for sql server: %v\n", err)
+		return 1
+	}
+	_ = admin.Close()
+
+	// Tests run against a database of their own, not master: change data
+	// capture cannot be enabled on a system database, so master would never
+	// exercise the migration that turns capture on.
+	dsn, err := databaseDSN(adminDSN, "Ordering")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "building connection string: %v\n", err)
+		return 1
+	}
+
+	if err := mssql.EnsureDatabase(ctx, dsn); err != nil {
+		fmt.Fprintf(os.Stderr, "creating database: %v\n", err)
 		return 1
 	}
 
@@ -82,11 +131,6 @@ func run(ctx context.Context, container *tcmssql.MSSQLServerContainer, m *testin
 		return 1
 	}
 	defer func() { _ = db.Close() }()
-
-	if err := waitForLogin(ctx, db); err != nil {
-		fmt.Fprintf(os.Stderr, "waiting for sql server: %v\n", err)
-		return 1
-	}
 
 	if err := mssql.Migrate(ctx, db); err != nil {
 		fmt.Fprintf(os.Stderr, "migrating: %v\n", err)
