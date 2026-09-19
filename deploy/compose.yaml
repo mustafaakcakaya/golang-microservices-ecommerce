@@ -227,7 +227,16 @@ services:
       # only its system databases.
       - ORDERING_DATABASE_URL=sqlserver://sa:${ORDERING_DB_PASSWORD:-Str0ng!Passw0rd}@orderingdb:1433?database=Ordering
       - ORDERING_SEED=true
+      # Ordering consumes checkouts from Basket, so it needs the broker.
+      - MESSAGE_BROKER_PROVIDER=${MESSAGE_BROKER_PROVIDER:-rabbitmq}
+      - MESSAGE_BROKER_RABBITMQ_URL=amqp://guest:guest@messagebroker:5672/
+      - MESSAGE_BROKER_KAFKA_BROKERS=kafka:29092
+      # Announce new orders to other services. Off by default in the service,
+      # so a deployment does not broadcast to consumers that are not ready.
+      - ORDERING_FULFILL_ORDERS=true
     depends_on:
+      messagebroker:
+        condition: service_healthy
       orderingdb:
         # The service migrates on startup, so it must not race the database.
         condition: service_healthy

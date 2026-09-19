@@ -180,7 +180,7 @@ func newRepository(t *testing.T) *mssql.OrderRepository {
 		t.Skip("skipping test that needs Docker")
 	}
 
-	return mssql.NewOrderRepository(sharedDB, integration.Map)
+	return mssql.NewOrderRepository(sharedDB, integration.NewMapper(true).Map)
 }
 
 // seedCustomer inserts a customer so orders have something to reference.

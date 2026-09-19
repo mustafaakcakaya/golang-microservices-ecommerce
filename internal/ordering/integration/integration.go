@@ -17,18 +17,38 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv1"
 )
 
+// Mapper turns domain events into the messages that will be stored in the
+// outbox.
+type Mapper struct {
+	// FulfillOrders decides whether new orders are announced to other
+	// services. It is off until something downstream is ready to fulfil them:
+	// an order nobody acts on is better than an order acted on twice by a
+	// half-deployed consumer, and the outbox keeps the history either way -
+	// only the announcement is withheld.
+	FulfillOrders bool
+}
+
+// NewMapper wires the mapper.
+func NewMapper(fulfillOrders bool) Mapper {
+	return Mapper{FulfillOrders: fulfillOrders}
+}
+
 // Map turns a domain event into the message that will be stored in the outbox.
 //
 // The second return value is false for a domain event that has no outward
 // contract: not everything that happens inside a service is anyone else's
 // business, and staying silent is the default.
-func Map(ctx context.Context, event domain.Event) (messaging.Envelope, bool, error) {
+func (m Mapper) Map(ctx context.Context, event domain.Event) (messaging.Envelope, bool, error) {
 	// The same value the error responses report as their trace id, so a failed
 	// request and the message it did or did not produce can be lined up.
 	header := messaging.NewHeader(httpx.CorrelationID(ctx))
 
 	switch raised := event.(type) {
 	case domain.OrderCreated:
+		if !m.FulfillOrders {
+			return messaging.Envelope{}, false, nil
+		}
+
 		return envelope(&orderingv1.OrderCreated{
 			Header:     header,
 			OrderID:    raised.Order.ID.UUID(),

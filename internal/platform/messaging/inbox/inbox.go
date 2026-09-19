@@ -17,9 +17,6 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
 )
 
-// Handler does something with a delivered message.
-type Handler func(ctx context.Context, envelope messaging.Envelope) error
-
 // Store records which messages a consumer has already handled.
 type Store interface {
 	// Begin claims a message for a consumer.
@@ -41,7 +38,9 @@ type Store interface {
 // crash between them repeats the work. Closing it entirely means writing the
 // business change and the completion in one transaction, which only the handler
 // can do. A handler that cannot should be naturally repeatable.
-func Idempotent(store Store, consumer string, log *slog.Logger, next Handler) Handler {
+func Idempotent(
+	store Store, consumer string, log *slog.Logger, next messaging.Delivery,
+) messaging.Delivery {
 	return func(ctx context.Context, envelope messaging.Envelope) error {
 		if envelope.ID == uuid.Nil {
 			// Without an id there is nothing to deduplicate on, and quietly

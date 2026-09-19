@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -137,8 +138,8 @@ func envelopeFrom(delivery amqp.Delivery) (messaging.Envelope, error) {
 		return messaging.Envelope{}, errors.New("the message carries no event type")
 	}
 
-	version, _ := delivery.Headers["schema-version"].(int32)
-	if version == 0 {
+	version, ok := intHeader(delivery.Headers["schema-version"])
+	if !ok {
 		return messaging.Envelope{}, errors.New("the message carries no schema version")
 	}
 
@@ -146,12 +147,40 @@ func envelopeFrom(delivery amqp.Delivery) (messaging.Envelope, error) {
 
 	return messaging.Envelope{
 		ID:            id,
-		Contract:      messaging.Contract{EventType: delivery.Type, Version: int(version)},
+		Contract:      messaging.Contract{EventType: delivery.Type, Version: version},
 		AggregateID:   aggregateID,
 		CorrelationID: delivery.CorrelationId,
 		OccurredOnUTC: delivery.Timestamp.UTC(),
 		Payload:       delivery.Body,
 	}, nil
+}
+
+// intHeader reads a whole number from an AMQP header.
+//
+// The wire format has several integer types and a publisher picks whichever
+// its library prefers - the same value arrives as a 32-bit integer from one
+// client and a 64-bit one from another. Refusing every encoding but our own
+// would reject messages that are perfectly well formed.
+func intHeader(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int8:
+		return int(typed), true
+	case int16:
+		return int(typed), true
+	case int32:
+		return int(typed), true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case string:
+		parsed, err := strconv.Atoi(typed)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
 }
 
 // open declares the queue, binds it and starts consuming.

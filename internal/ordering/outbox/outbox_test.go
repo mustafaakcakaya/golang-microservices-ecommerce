@@ -161,7 +161,7 @@ func skipWithoutDocker(t *testing.T) {
 func placeOrder(t *testing.T, name string, alsoUpdate bool) *domain.Order {
 	t.Helper()
 
-	repo := mssql.NewOrderRepository(sharedDB, integration.Map)
+	repo := mssql.NewOrderRepository(sharedDB, integration.NewMapper(true).Map)
 
 	customerID := seedCustomer(t)
 	productID := seedProduct(t)
