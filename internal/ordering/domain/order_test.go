@@ -250,3 +250,54 @@ func TestRestoreDoesNotRaiseEvents(t *testing.T) {
 		t.Errorf("status = %v, want the stored one", restored.Status)
 	}
 }
+
+func TestAnUnpaidOrderStartsAsADraft(t *testing.T) {
+	t.Parallel()
+
+	orderID, err := domain.NewOrderID(uuid.New())
+	if err != nil {
+		t.Fatalf("order id: %v", err)
+	}
+	customerID, err := domain.NewCustomerID(uuid.New())
+	if err != nil {
+		t.Fatalf("customer id: %v", err)
+	}
+	orderName, err := domain.NewOrderName("ORD_1")
+	if err != nil {
+		t.Fatalf("order name: %v", err)
+	}
+	address, err := domain.NewAddress("Mustafa", "Akcakaya", "mustafa@example.com",
+		"Test Address", "Turkey", "Istanbul", "34000")
+	if err != nil {
+		t.Fatalf("address: %v", err)
+	}
+
+	order := domain.NewUnpaidOrder(orderID, customerID, orderName, address, address)
+
+	// A checkout carries no card details, so the order it produces has none.
+	// The absence has to be a state the domain can express.
+	if !order.Payment.IsZero() {
+		t.Error("an unpaid order should carry no payment")
+	}
+	// Draft rather than pending: nothing should treat it as confirmed until a
+	// payment is recorded against it.
+	if order.Status != domain.OrderStatusDraft {
+		t.Errorf("status = %v, want Draft", order.Status)
+	}
+	if len(order.Events()) != 1 {
+		t.Errorf("events = %d, want the pending OrderCreated", len(order.Events()))
+	}
+}
+
+func TestAPaidOrderIsNotMistakenForAnUnpaidOne(t *testing.T) {
+	t.Parallel()
+
+	order := newOrder(t)
+
+	if order.Payment.IsZero() {
+		t.Error("an order created with a payment should not read as unpaid")
+	}
+	if order.Status != domain.OrderStatusPending {
+		t.Errorf("status = %v, want Pending", order.Status)
+	}
+}

@@ -107,6 +107,33 @@ func TestTheViewCarriesTheDerivedTotal(t *testing.T) {
 	}
 }
 
+func TestAnUnpaidOrderReportsNoPayment(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepository(unpaidOrder(t, "ORD_U", customerID(t)))
+	handler := orders.NewGetOrdersHandler(repo)
+
+	result, err := handler.Handle(t.Context(), orders.GetOrdersQuery{})
+	if err != nil {
+		t.Fatalf("listing: %v", err)
+	}
+
+	if result.Orders.Data[0].Payment != nil {
+		t.Errorf("payment = %+v, want it absent until the order is paid for",
+			result.Orders.Data[0].Payment)
+	}
+
+	body, err := json.Marshal(result.Orders)
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	// Null rather than an object of empty strings, which would read like a
+	// card nobody filled in.
+	if !strings.Contains(string(body), `"payment":null`) {
+		t.Errorf("body = %s, want a null payment", body)
+	}
+}
+
 func TestGetOrdersByNameMatchesPartOfTheName(t *testing.T) {
 	t.Parallel()
 

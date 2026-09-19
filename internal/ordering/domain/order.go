@@ -33,6 +33,24 @@ type Order struct {
 	items []OrderItem
 }
 
+// NewUnpaidOrder creates an order that has not been paid for yet.
+//
+// It starts as a draft rather than pending: nothing should act on it as a
+// confirmed order until a payment is recorded against it.
+func NewUnpaidOrder(
+	id OrderID,
+	customerID CustomerID,
+	orderName OrderName,
+	shippingAddress Address,
+	billingAddress Address,
+) *Order {
+	order := newOrder(id, customerID, orderName, shippingAddress, billingAddress, Payment{}, OrderStatusDraft)
+
+	order.raise(OrderCreated{Order: order})
+
+	return order
+}
+
 // NewOrder creates an order and raises OrderCreated.
 func NewOrder(
 	id OrderID,
@@ -42,19 +60,33 @@ func NewOrder(
 	billingAddress Address,
 	payment Payment,
 ) *Order {
-	order := &Order{
+	order := newOrder(id, customerID, orderName, shippingAddress, billingAddress, payment, OrderStatusPending)
+
+	order.raise(OrderCreated{Order: order})
+
+	return order
+}
+
+// newOrder builds the aggregate without raising anything, so the constructors
+// above differ only in what they mean rather than in how they assemble.
+func newOrder(
+	id OrderID,
+	customerID CustomerID,
+	orderName OrderName,
+	shippingAddress Address,
+	billingAddress Address,
+	payment Payment,
+	status OrderStatus,
+) *Order {
+	return &Order{
 		ID:              id,
 		CustomerID:      customerID,
 		OrderName:       orderName,
 		ShippingAddress: shippingAddress,
 		BillingAddress:  billingAddress,
 		Payment:         payment,
-		Status:          OrderStatusPending,
+		Status:          status,
 	}
-
-	order.raise(OrderCreated{Order: order})
-
-	return order
 }
 
 // Items returns the lines. The slice is copied so a caller cannot reach past

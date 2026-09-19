@@ -181,6 +181,29 @@ func storedOrder(t *testing.T, name string, customerID domain.CustomerID) *domai
 		domain.OrderStatusPending, []domain.OrderItem{item})
 }
 
+// unpaidOrder is an order as checkout produces one: a draft with no payment.
+func unpaidOrder(t *testing.T, name string, customerID domain.CustomerID) *domain.Order {
+	t.Helper()
+
+	orderID, err := domain.NewOrderID(uuid.New())
+	if err != nil {
+		t.Fatalf("order id: %v", err)
+	}
+	orderName, err := domain.NewOrderName(name)
+	if err != nil {
+		t.Fatalf("order name: %v", err)
+	}
+	address, err := sampleAddressDomain()
+	if err != nil {
+		t.Fatalf("address: %v", err)
+	}
+
+	order := domain.NewUnpaidOrder(orderID, customerID, orderName, address, address)
+	order.PullEvents()
+
+	return order
+}
+
 func sampleAddressDomain() (domain.Address, error) {
 	a := sampleAddress()
 	return domain.NewAddress(a.FirstName, a.LastName, a.EmailAddress, a.AddressLine, a.Country, a.State, a.ZipCode)

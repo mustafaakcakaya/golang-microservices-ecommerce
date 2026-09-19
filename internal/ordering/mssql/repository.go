@@ -242,6 +242,14 @@ func upsertOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
 	shipping := order.ShippingAddress
 	billing := order.BillingAddress
 
+	// An unpaid order stores NULLs rather than empty strings, so "not paid
+	// for yet" cannot be mistaken for a card number nobody filled in.
+	var cardNumber, expiration, cvv, method any
+	if !payment.IsZero() {
+		cardNumber, expiration = payment.CardNumber(), payment.Expiration()
+		cvv, method = payment.CVV(), payment.PaymentMethod()
+	}
+
 	const query = `
 		MERGE Orders WITH (HOLDLOCK) AS target
 		USING (SELECT @p1 AS Id) AS source ON target.Id = source.Id
@@ -278,8 +286,7 @@ func upsertOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
 		shipping.Country, shipping.State, shipping.ZipCode,
 		billing.FirstName, billing.LastName, nullable(billing.EmailAddress), billing.AddressLine,
 		billing.Country, billing.State, billing.ZipCode,
-		nullable(payment.CardName()), payment.CardNumber(), payment.Expiration(),
-		payment.CVV(), payment.PaymentMethod(),
+		nullable(payment.CardName()), cardNumber, expiration, cvv, method,
 	)
 	if err != nil {
 		if isForeignKeyViolation(err) {

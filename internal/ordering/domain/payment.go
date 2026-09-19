@@ -47,6 +47,15 @@ func NewPayment(cardName, cardNumber, expiration, cvv string, paymentMethod int)
 	}, nil
 }
 
+// IsZero reports whether the order has no payment recorded yet.
+//
+// An order can be placed before it is paid for - a checkout that carries no
+// card details produces exactly that - so the absence of a payment is a state
+// the domain has to be able to express rather than a broken value.
+func (p Payment) IsZero() bool {
+	return p.cardNumber == ""
+}
+
 // CardName returns the name on the card.
 func (p Payment) CardName() string { return p.cardName }
 

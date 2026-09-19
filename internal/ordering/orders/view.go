@@ -45,15 +45,17 @@ type OrderItemView struct {
 // The status travels as its name rather than its number: the number is a
 // storage detail, and "Pending" is readable in a response where 2 is not.
 type OrderView struct {
-	ID              uuid.UUID       `json:"id"`
-	CustomerID      uuid.UUID       `json:"customerId"`
-	OrderName       string          `json:"orderName"`
-	Status          string          `json:"status"`
-	ShippingAddress AddressView     `json:"shippingAddress"`
-	BillingAddress  AddressView     `json:"billingAddress"`
-	Payment         PaymentView     `json:"payment"`
-	Items           []OrderItemView `json:"orderItems"`
-	TotalPrice      decimal.Decimal `json:"totalPrice"`
+	ID              uuid.UUID   `json:"id"`
+	CustomerID      uuid.UUID   `json:"customerId"`
+	OrderName       string      `json:"orderName"`
+	Status          string      `json:"status"`
+	ShippingAddress AddressView `json:"shippingAddress"`
+	BillingAddress  AddressView `json:"billingAddress"`
+	// Absent until the order is paid for, rather than an object full of empty
+	// strings that reads like a card nobody filled in.
+	Payment    *PaymentView    `json:"payment"`
+	Items      []OrderItemView `json:"orderItems"`
+	TotalPrice decimal.Decimal `json:"totalPrice"`
 }
 
 // viewOf maps an aggregate to its read model.
@@ -82,14 +84,9 @@ func viewOf(order *domain.Order) OrderView {
 		Status:          order.Status.String(),
 		ShippingAddress: addressView(order.ShippingAddress),
 		BillingAddress:  addressView(order.BillingAddress),
-		Payment: PaymentView{
-			CardName:         order.Payment.CardName(),
-			MaskedCardNumber: order.Payment.MaskedCardNumber(),
-			Expiration:       order.Payment.Expiration(),
-			PaymentMethod:    order.Payment.PaymentMethod(),
-		},
-		Items:      lines,
-		TotalPrice: order.TotalPrice(),
+		Payment:         paymentView(order.Payment),
+		Items:           lines,
+		TotalPrice:      order.TotalPrice(),
 	}
 }
 
@@ -101,6 +98,20 @@ func viewsOf(list []*domain.Order) []OrderView {
 		views = append(views, viewOf(order))
 	}
 	return views
+}
+
+// paymentView renders the payment, or nothing when there is none yet.
+func paymentView(payment domain.Payment) *PaymentView {
+	if payment.IsZero() {
+		return nil
+	}
+
+	return &PaymentView{
+		CardName:         payment.CardName(),
+		MaskedCardNumber: payment.MaskedCardNumber(),
+		Expiration:       payment.Expiration(),
+		PaymentMethod:    payment.PaymentMethod(),
+	}
 }
 
 func addressView(address domain.Address) AddressView {

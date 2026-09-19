@@ -288,6 +288,59 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAnOrderWithoutPaymentRoundTrips(t *testing.T) {
+	repo := newRepository(t)
+	db := sharedDB
+
+	customerID := seedCustomer(t, db)
+	productID := seedProduct(t, db)
+
+	orderID, err := domain.NewOrderID(uuid.New())
+	if err != nil {
+		t.Fatalf("order id: %v", err)
+	}
+	orderName, err := domain.NewOrderName("ORD_N")
+	if err != nil {
+		t.Fatalf("order name: %v", err)
+	}
+	address, err := domain.NewAddress("Mustafa", "Akcakaya", "mustafa@example.com",
+		"Test Address", "Turkey", "Istanbul", "34000")
+	if err != nil {
+		t.Fatalf("address: %v", err)
+	}
+
+	order := domain.NewUnpaidOrder(orderID, customerID, orderName, address, address)
+	if err := order.Add(productID, 1, decimal.NewFromInt(120)); err != nil {
+		t.Fatalf("adding line: %v", err)
+	}
+	if err := repo.Save(t.Context(), order); err != nil {
+		t.Fatalf("saving: %v", err)
+	}
+
+	got, err := repo.ByID(t.Context(), order.ID)
+	if err != nil {
+		t.Fatalf("loading: %v", err)
+	}
+	// "Not paid for yet" has to survive storage as itself.
+	if !got.Payment.IsZero() {
+		t.Errorf("payment = %v, want none", got.Payment)
+	}
+	if got.Status != domain.OrderStatusDraft {
+		t.Errorf("status = %v, want Draft", got.Status)
+	}
+
+	// Stored as NULL rather than as empty strings, so a reader cannot mistake
+	// an unpaid order for one with blank card details.
+	var storedCard *string
+	if err := db.QueryRowContext(t.Context(),
+		`SELECT Payment_CardNumber FROM Orders WHERE Id = @p1`, order.ID.UUID()).Scan(&storedCard); err != nil {
+		t.Fatalf("reading the stored payment: %v", err)
+	}
+	if storedCard != nil {
+		t.Errorf("stored card number = %q, want NULL", *storedCard)
+	}
+}
+
 func TestLoadingAnUnknownOrderReportsNotFound(t *testing.T) {
 	repo := newRepository(t)
 

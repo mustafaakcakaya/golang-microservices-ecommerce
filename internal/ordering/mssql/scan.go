@@ -38,20 +38,20 @@ type scanner interface {
 // been created through the API.
 func scanOrder(row scanner) (*domain.Order, error) {
 	var (
-		id, customerID         guid
-		orderName, status      string
-		shipFirst, shipLast    string
-		shipEmail              *string
-		shipLine, shipCountry  string
-		shipState, shipZip     string
-		billFirst, billLast    string
-		billEmail              *string
-		billLine, billCountry  string
-		billState, billZip     string
-		cardName               *string
-		cardNumber, expiration string
-		cvv                    string
-		paymentMethod          int
+		id, customerID        guid
+		orderName, status     string
+		shipFirst, shipLast   string
+		shipEmail             *string
+		shipLine, shipCountry string
+		shipState, shipZip    string
+		billFirst, billLast   string
+		billEmail             *string
+		billLine, billCountry string
+		billState, billZip    string
+		// All nullable: an order placed through checkout has no payment yet.
+		cardName, cardNumber *string
+		expiration, cvv      *string
+		paymentMethod        *int
 	)
 
 	if err := row.Scan(
@@ -87,9 +87,9 @@ func scanOrder(row scanner) (*domain.Order, error) {
 	if err != nil {
 		return nil, fmt.Errorf("billing address: %w", err)
 	}
-	payment, err := domain.NewPayment(deref(cardName), cardNumber, expiration, cvv, paymentMethod)
+	payment, err := scanPayment(cardName, cardNumber, expiration, cvv, paymentMethod)
 	if err != nil {
-		return nil, fmt.Errorf("payment: %w", err)
+		return nil, err
 	}
 
 	return domain.Restore(orderID, customer, name, shipping, billing, payment, orderStatus, nil), nil
@@ -140,6 +140,29 @@ func withItems(order *domain.Order, items []domain.OrderItem) *domain.Order {
 		order.ShippingAddress, order.BillingAddress, order.Payment,
 		order.Status, items,
 	)
+}
+
+// scanPayment rebuilds the payment, or reports that there is none.
+//
+// A missing card number is the marker: the domain's zero Payment means the
+// order has not been paid for, which is different from a payment whose fields
+// happen to be blank.
+func scanPayment(cardName, cardNumber, expiration, cvv *string, paymentMethod *int) (domain.Payment, error) {
+	if cardNumber == nil {
+		return domain.Payment{}, nil
+	}
+
+	method := 0
+	if paymentMethod != nil {
+		method = *paymentMethod
+	}
+
+	payment, err := domain.NewPayment(deref(cardName), *cardNumber, deref(expiration), deref(cvv), method)
+	if err != nil {
+		return domain.Payment{}, fmt.Errorf("payment: %w", err)
+	}
+
+	return payment, nil
 }
 
 func deref(value *string) string {
