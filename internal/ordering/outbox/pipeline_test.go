@@ -94,7 +94,7 @@ func TestAnOrderTravelsFromTheDatabaseToTheBroker(t *testing.T) {
 	skipWithoutDocker(t)
 
 	order := placeOrder(t, "ORD_F", false)
-	group := waitForGroup(t, outbox.NewReader(sharedDB), nil, order.ID.String(), 1)
+	group := waitForGroup(t, outbox.NewReader(sharedDB), nil, order.ID().String(), 1)
 
 	broker := &recordingBroker{}
 	checkpoints := startedJustBefore(t, group, "pipeline-"+uuid.NewString())
@@ -103,7 +103,7 @@ func TestAnOrderTravelsFromTheDatabaseToTheBroker(t *testing.T) {
 		t.Fatalf("processing: %v", err)
 	}
 
-	delivered := broker.deliveriesOf(order.ID.String())
+	delivered := broker.deliveriesOf(order.ID().String())
 	if len(delivered) != 1 {
 		t.Fatalf("the broker received %d messages, want the one order", len(delivered))
 	}
@@ -116,7 +116,7 @@ func TestARestartResumesRatherThanRepublishing(t *testing.T) {
 	skipWithoutDocker(t)
 
 	order := placeOrder(t, "ORD_G", false)
-	group := waitForGroup(t, outbox.NewReader(sharedDB), nil, order.ID.String(), 1)
+	group := waitForGroup(t, outbox.NewReader(sharedDB), nil, order.ID().String(), 1)
 
 	broker := &recordingBroker{}
 	checkpoints := startedJustBefore(t, group, "pipeline-"+uuid.NewString())
@@ -131,7 +131,7 @@ func TestARestartResumesRatherThanRepublishing(t *testing.T) {
 		t.Fatalf("second run: %v", err)
 	}
 
-	if delivered := broker.deliveriesOf(order.ID.String()); len(delivered) != 1 {
+	if delivered := broker.deliveriesOf(order.ID().String()); len(delivered) != 1 {
 		t.Errorf("the broker received %d messages, want one: the position survived the restart",
 			len(delivered))
 	}
@@ -141,7 +141,7 @@ func TestACrashBeforeCheckpointingRedeliversAndTheInboxAbsorbsIt(t *testing.T) {
 	skipWithoutDocker(t)
 
 	order := placeOrder(t, "ORD_H", false)
-	group := waitForGroup(t, outbox.NewReader(sharedDB), nil, order.ID.String(), 1)
+	group := waitForGroup(t, outbox.NewReader(sharedDB), nil, order.ID().String(), 1)
 
 	broker := &recordingBroker{}
 	checkpoints := startedJustBefore(t, group, "pipeline-"+uuid.NewString())
@@ -161,7 +161,7 @@ func TestACrashBeforeCheckpointingRedeliversAndTheInboxAbsorbsIt(t *testing.T) {
 		t.Fatalf("second run: %v", err)
 	}
 
-	delivered := broker.deliveriesOf(order.ID.String())
+	delivered := broker.deliveriesOf(order.ID().String())
 	if len(delivered) != 2 {
 		t.Fatalf("the broker received %d messages, want the duplicate a crash produces", len(delivered))
 	}

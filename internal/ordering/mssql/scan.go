@@ -136,9 +136,9 @@ func scanOrderItem(row scanner) (domain.OrderItem, error) {
 // withItems returns the order with its lines attached.
 func withItems(order *domain.Order, items []domain.OrderItem) *domain.Order {
 	return domain.Restore(
-		order.ID, order.CustomerID, order.OrderName,
-		order.ShippingAddress, order.BillingAddress, order.Payment,
-		order.Status, items,
+		order.ID(), order.CustomerID(), order.OrderName(),
+		order.ShippingAddress(), order.BillingAddress(), order.Payment(),
+		order.Status(), items,
 	)
 }
 

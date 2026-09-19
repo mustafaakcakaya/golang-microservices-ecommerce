@@ -51,10 +51,10 @@ func (m Mapper) Map(ctx context.Context, event domain.Event) (messaging.Envelope
 
 		return envelope(&orderingv1.OrderCreated{
 			Header:     header,
-			OrderID:    raised.Order.ID.UUID(),
-			CustomerID: raised.Order.CustomerID.UUID(),
-			OrderName:  raised.Order.OrderName.String(),
-			Status:     raised.Order.Status.String(),
+			OrderID:    raised.Order.ID().UUID(),
+			CustomerID: raised.Order.CustomerID().UUID(),
+			OrderName:  raised.Order.OrderName().String(),
+			Status:     raised.Order.Status().String(),
 			TotalPrice: messaging.NewMoney(raised.Order.TotalPrice()),
 			Items:      lines(raised.Order),
 		}, raised.Order)
@@ -62,10 +62,10 @@ func (m Mapper) Map(ctx context.Context, event domain.Event) (messaging.Envelope
 	case domain.OrderUpdated:
 		return envelope(&orderingv1.OrderUpdated{
 			Header:     header,
-			OrderID:    raised.Order.ID.UUID(),
-			CustomerID: raised.Order.CustomerID.UUID(),
-			OrderName:  raised.Order.OrderName.String(),
-			Status:     raised.Order.Status.String(),
+			OrderID:    raised.Order.ID().UUID(),
+			CustomerID: raised.Order.CustomerID().UUID(),
+			OrderName:  raised.Order.OrderName().String(),
+			Status:     raised.Order.Status().String(),
 			TotalPrice: messaging.NewMoney(raised.Order.TotalPrice()),
 		}, raised.Order)
 
@@ -84,7 +84,7 @@ func Registry() *messaging.Registry {
 }
 
 func envelope(event messaging.Event, order *domain.Order) (messaging.Envelope, bool, error) {
-	built, err := messaging.NewEnvelope(event, order.ID.String())
+	built, err := messaging.NewEnvelope(event, order.ID().String())
 	if err != nil {
 		return messaging.Envelope{}, false, err
 	}

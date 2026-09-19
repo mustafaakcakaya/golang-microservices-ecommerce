@@ -16,13 +16,13 @@ func TestReadingRebuildsTheStoredMessage(t *testing.T) {
 	reader := outbox.NewReader(sharedDB)
 	order := placeOrder(t, "ORD_R", false)
 
-	group := waitForGroup(t, reader, nil, order.ID.String(), 1)
+	group := waitForGroup(t, reader, nil, order.ID().String(), 1)
 
 	message := group.Messages[0]
 	if message.Contract != (orderingv1.OrderCreated{}).Contract() {
 		t.Errorf("contract = %v, want ordering.order-created v1", message.Contract)
 	}
-	if message.AggregateID != order.ID.String() {
+	if message.AggregateID != order.ID().String() {
 		t.Errorf("aggregate = %q, want the order id", message.AggregateID)
 	}
 
@@ -53,7 +53,7 @@ func TestOneTransactionIsOneGroup(t *testing.T) {
 	// written by one transaction.
 	order := placeOrder(t, "ORD_T", true)
 
-	group := waitForGroup(t, reader, nil, order.ID.String(), 2)
+	group := waitForGroup(t, reader, nil, order.ID().String(), 2)
 
 	// Grouping is what lets the checkpoint stop only at transaction
 	// boundaries: publishing half of a transaction would tell other services
@@ -73,7 +73,7 @@ func TestABatchIsNeverCutInsideATransaction(t *testing.T) {
 
 	// Wait for capture first, then read with a batch smaller than the
 	// transaction that produced the messages.
-	group := waitForGroup(t, reader, nil, order.ID.String(), 2)
+	group := waitForGroup(t, reader, nil, order.ID().String(), 2)
 
 	batch, err := reader.Read(t.Context(), previous(t, group.LSN), 1)
 	if err != nil {
@@ -96,10 +96,10 @@ func TestReadingResumesAfterTheCheckpoint(t *testing.T) {
 	reader := outbox.NewReader(sharedDB)
 
 	first := placeOrder(t, "ORD_1", false)
-	firstGroup := waitForGroup(t, reader, nil, first.ID.String(), 1)
+	firstGroup := waitForGroup(t, reader, nil, first.ID().String(), 1)
 
 	second := placeOrder(t, "ORD_2", false)
-	secondGroup := waitForGroup(t, reader, firstGroup.LSN, second.ID.String(), 1)
+	secondGroup := waitForGroup(t, reader, firstGroup.LSN, second.ID().String(), 1)
 
 	// Reading from a position returns what came after it and nothing else,
 	// which is what makes a restart resume rather than replay.

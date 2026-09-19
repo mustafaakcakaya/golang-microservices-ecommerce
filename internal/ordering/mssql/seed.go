@@ -51,7 +51,7 @@ func Seed(ctx context.Context, db *sql.DB) (int, error) {
 	repo := NewOrderRepository(db, DropEvents)
 	for _, order := range orders {
 		if err := repo.Save(ctx, order); err != nil {
-			return 0, fmt.Errorf("seeding order %s: %w", order.OrderName, err)
+			return 0, fmt.Errorf("seeding order %s: %w", order.OrderName(), err)
 		}
 	}
 

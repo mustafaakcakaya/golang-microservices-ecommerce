@@ -55,7 +55,7 @@ func TestOutboxInsertsReachTheChangeTable(t *testing.T) {
 	deadline := time.Now().Add(captureTimeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		count, err := countCapturedFor(t, order.ID.String())
+		count, err := countCapturedFor(t, order.ID().String())
 		lastErr = err
 
 		if err == nil && count == 1 {

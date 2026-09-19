@@ -43,12 +43,13 @@ func newRepositoryWithPool(t *testing.T) (*postgres.ProductRepository, *pgxpool.
 		tcpostgres.WithDatabase("catalog"),
 		tcpostgres.WithUsername("postgres"),
 		tcpostgres.WithPassword("postgres"),
-		// The deadline belongs on this call, not on the strategy:
-		// WithWaitStrategy caps the whole wait at a minute whatever the
-		// strategy's own timeout says.
+		// Both limits are raised: the deadline around the whole wait and the
+		// strategy's own startup timeout each default to a minute, and
+		// raising one leaves the other in place.
 		testcontainers.WithWaitStrategyAndDeadline(2*time.Minute,
 			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2),
+				WithOccurrence(2).
+				WithStartupTimeout(2*time.Minute),
 		),
 	)
 	if err != nil {

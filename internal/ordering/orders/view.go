@@ -78,13 +78,13 @@ func viewOf(order *domain.Order) OrderView {
 	}
 
 	return OrderView{
-		ID:              order.ID.UUID(),
-		CustomerID:      order.CustomerID.UUID(),
-		OrderName:       order.OrderName.String(),
-		Status:          order.Status.String(),
-		ShippingAddress: addressView(order.ShippingAddress),
-		BillingAddress:  addressView(order.BillingAddress),
-		Payment:         paymentView(order.Payment),
+		ID:              order.ID().UUID(),
+		CustomerID:      order.CustomerID().UUID(),
+		OrderName:       order.OrderName().String(),
+		Status:          order.Status().String(),
+		ShippingAddress: addressView(order.ShippingAddress()),
+		BillingAddress:  addressView(order.BillingAddress()),
+		Payment:         paymentView(order.Payment()),
 		Items:           lines,
 		TotalPrice:      order.TotalPrice(),
 	}

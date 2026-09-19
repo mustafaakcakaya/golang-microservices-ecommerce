@@ -47,12 +47,14 @@ func TestMain(m *testing.M) {
 			"MSSQL_PID":           "Developer",
 			"MSSQL_AGENT_ENABLED": "true",
 		}),
-		// WithWaitStrategyAndDeadline, not WithWaitStrategy: the latter caps
-		// the whole wait at a minute regardless of the strategy's own timeout.
-		// A first boot of a new major version upgrades the system databases,
-		// which takes longer than that when several containers do it at once.
+		// Two separate limits, and both default to a minute: the deadline
+		// around the whole wait, and the strategy's own startup timeout.
+		// Raising one leaves the other in place, so both are set. A first boot
+		// of a new major version upgrades the system databases, which takes
+		// longer than a minute when several containers do it at once.
 		testcontainers.WithWaitStrategyAndDeadline(5*time.Minute,
-			wait.ForLog("SQL Server is now ready for client connections"),
+			wait.ForLog("SQL Server is now ready for client connections").
+				WithStartupTimeout(5*time.Minute),
 		),
 	)
 	if err != nil {

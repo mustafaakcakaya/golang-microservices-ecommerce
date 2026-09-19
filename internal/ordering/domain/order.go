@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"fmt"
+
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
@@ -22,16 +24,41 @@ type Order struct {
 	aggregate
 	Audit
 
-	ID              OrderID
-	CustomerID      CustomerID
-	OrderName       OrderName
-	ShippingAddress Address
-	BillingAddress  Address
-	Payment         Payment
-	Status          OrderStatus
+	// Every field is private, and there are getters but no setters. Reading an
+	// order is nobody's business but their own; changing one has to go through
+	// Update, Add or Remove, which is where the rules live and where the
+	// events are raised. A setter would be a way around both.
+	id              OrderID
+	customerID      CustomerID
+	orderName       OrderName
+	shippingAddress Address
+	billingAddress  Address
+	payment         Payment
+	status          OrderStatus
 
 	items []OrderItem
 }
+
+// ID identifies the order.
+func (o *Order) ID() OrderID { return o.id }
+
+// CustomerID is who placed it.
+func (o *Order) CustomerID() CustomerID { return o.customerID }
+
+// OrderName is its human-readable reference.
+func (o *Order) OrderName() OrderName { return o.orderName }
+
+// ShippingAddress is where it goes.
+func (o *Order) ShippingAddress() Address { return o.shippingAddress }
+
+// BillingAddress is where it is billed.
+func (o *Order) BillingAddress() Address { return o.billingAddress }
+
+// Payment is how it was paid for, which is the zero value until it is.
+func (o *Order) Payment() Payment { return o.payment }
+
+// Status is where it sits in its lifecycle.
+func (o *Order) Status() OrderStatus { return o.status }
 
 // NewUnpaidOrder creates an order that has not been paid for yet.
 //
@@ -79,14 +106,28 @@ func newOrder(
 	status OrderStatus,
 ) *Order {
 	return &Order{
-		ID:              id,
-		CustomerID:      customerID,
-		OrderName:       orderName,
-		ShippingAddress: shippingAddress,
-		BillingAddress:  billingAddress,
-		Payment:         payment,
-		Status:          status,
+		id:              id,
+		customerID:      customerID,
+		orderName:       orderName,
+		shippingAddress: shippingAddress,
+		billingAddress:  billingAddress,
+		payment:         payment,
+		status:          status,
 	}
+}
+
+// String renders the order without its payment details.
+//
+// It is not decoration. Formatting a struct walks into every field, and fmt
+// only asks an exported field to render itself - an unexported one is printed
+// raw, Stringer or not. Making the aggregate render itself is what stops a
+// %+v of an order from printing the card number the payment hides.
+//
+// The receiver is a value so that both an Order and an *Order format safely;
+// with a pointer receiver, printing a copy would fall back to walking fields.
+func (o Order) String() string {
+	return fmt.Sprintf("Order{id: %s, name: %s, status: %s, lines: %d, total: %s, payment: %v}",
+		o.id, o.orderName, o.status, len(o.items), o.TotalPrice(), o.payment)
 }
 
 // Items returns the lines. The slice is copied so a caller cannot reach past
@@ -119,11 +160,11 @@ func (o *Order) Update(
 		return invalidf("unknown order status %d", int(status))
 	}
 
-	o.OrderName = orderName
-	o.ShippingAddress = shippingAddress
-	o.BillingAddress = billingAddress
-	o.Payment = payment
-	o.Status = status
+	o.orderName = orderName
+	o.shippingAddress = shippingAddress
+	o.billingAddress = billingAddress
+	o.payment = payment
+	o.status = status
 
 	o.raise(OrderUpdated{Order: o})
 
@@ -141,7 +182,7 @@ func (o *Order) Add(productID ProductID, quantity int, price decimal.Decimal) er
 
 	o.items = append(o.items, OrderItem{
 		ID:        OrderItemID(uuid.New()),
-		OrderID:   o.ID,
+		OrderID:   o.id,
 		ProductID: productID,
 		Quantity:  quantity,
 		Price:     price,
@@ -177,15 +218,7 @@ func Restore(
 	status OrderStatus,
 	items []OrderItem,
 ) *Order {
-	order := &Order{
-		ID:              id,
-		CustomerID:      customerID,
-		OrderName:       orderName,
-		ShippingAddress: shippingAddress,
-		BillingAddress:  billingAddress,
-		Payment:         payment,
-		Status:          status,
-	}
+	order := newOrder(id, customerID, orderName, shippingAddress, billingAddress, payment, status)
 
 	order.items = make([]OrderItem, len(items))
 	copy(order.items, items)

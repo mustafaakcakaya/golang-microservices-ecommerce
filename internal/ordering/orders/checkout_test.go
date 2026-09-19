@@ -127,12 +127,12 @@ func TestACheckoutBecomesAnUnpaidOrderOfItsOwnLines(t *testing.T) {
 	}
 
 	// No card details travelled, so the order is not paid for yet.
-	if !order.Payment.IsZero() || order.Status != domain.OrderStatusDraft {
-		t.Errorf("order = %v/%v, want an unpaid draft", order.Payment, order.Status)
+	if !order.Payment().IsZero() || order.Status() != domain.OrderStatusDraft {
+		t.Errorf("order = %v/%v, want an unpaid draft", order.Payment(), order.Status())
 	}
 
 	// The domain fixes the length, so the user name cannot be the order name.
-	if got := order.OrderName.String(); len(got) != 5 {
+	if got := order.OrderName().String(); len(got) != 5 {
 		t.Errorf("order name = %q, want five characters", got)
 	}
 }
@@ -242,7 +242,7 @@ func TestOrderReferencesDoNotRepeat(t *testing.T) {
 	}
 
 	for _, order := range repo.saved {
-		name := order.OrderName.String()
+		name := order.OrderName().String()
 		if strings.ContainsAny(name, "IO01") {
 			t.Errorf("reference %q uses a character that is easy to misread", name)
 		}

@@ -37,13 +37,13 @@ type fakeRepository struct {
 func newFakeRepository(seed ...*domain.Order) *fakeRepository {
 	repo := &fakeRepository{items: make(map[uuid.UUID]*domain.Order)}
 	for _, order := range seed {
-		repo.items[order.ID.UUID()] = order
+		repo.items[order.ID().UUID()] = order
 	}
 	return repo
 }
 
 func (r *fakeRepository) Save(_ context.Context, order *domain.Order) error {
-	r.items[order.ID.UUID()] = order
+	r.items[order.ID().UUID()] = order
 	r.saved = append(r.saved, order)
 	return nil
 }
@@ -68,7 +68,7 @@ func (r *fakeRepository) List(_ context.Context, page pagination.Request) ([]*do
 func (r *fakeRepository) ByName(_ context.Context, name string) ([]*domain.Order, error) {
 	var matches []*domain.Order
 	for _, order := range r.all() {
-		if strings.Contains(order.OrderName.String(), name) {
+		if strings.Contains(order.OrderName().String(), name) {
 			matches = append(matches, order)
 		}
 	}
@@ -78,7 +78,7 @@ func (r *fakeRepository) ByName(_ context.Context, name string) ([]*domain.Order
 func (r *fakeRepository) ByCustomer(_ context.Context, customerID domain.CustomerID) ([]*domain.Order, error) {
 	var matches []*domain.Order
 	for _, order := range r.all() {
-		if order.CustomerID == customerID {
+		if order.CustomerID() == customerID {
 			matches = append(matches, order)
 		}
 	}
@@ -102,7 +102,7 @@ func (r *fakeRepository) all() []*domain.Order {
 	}
 
 	slices.SortFunc(all, func(a, b *domain.Order) int {
-		return strings.Compare(a.OrderName.String(), b.OrderName.String())
+		return strings.Compare(a.OrderName().String(), b.OrderName().String())
 	})
 
 	return all
@@ -239,8 +239,8 @@ func TestCreateStoresTheOrderWithItsLines(t *testing.T) {
 	if !ok {
 		t.Fatal("the order was not saved")
 	}
-	if stored.OrderName.String() != "ORD_1" || stored.Status != domain.OrderStatusPending {
-		t.Errorf("order = %s/%v, want ORD_1/Pending", stored.OrderName, stored.Status)
+	if stored.OrderName().String() != "ORD_1" || stored.Status() != domain.OrderStatusPending {
+		t.Errorf("order = %s/%v, want ORD_1/Pending", stored.OrderName(), stored.Status())
 	}
 	if items := stored.Items(); len(items) != 1 || items[0].Quantity != 2 {
 		t.Fatalf("items = %+v, want the single requested line", items)
@@ -362,7 +362,7 @@ func TestUpdateChangesTheOrderAndKeepsItsLines(t *testing.T) {
 	handler := orders.NewUpdateOrderHandler(repo)
 
 	result, err := handler.Handle(t.Context(), orders.UpdateOrderCommand{
-		ID:              existing.ID.UUID(),
+		ID:              existing.ID().UUID(),
 		OrderName:       "ORD_2",
 		ShippingAddress: sampleAddress(),
 		BillingAddress:  sampleAddress(),
@@ -376,9 +376,9 @@ func TestUpdateChangesTheOrderAndKeepsItsLines(t *testing.T) {
 		t.Error("the update reported no success")
 	}
 
-	stored := repo.items[existing.ID.UUID()]
-	if stored.OrderName.String() != "ORD_2" || stored.Status != domain.OrderStatusCompleted {
-		t.Errorf("order = %s/%v, want ORD_2/Completed", stored.OrderName, stored.Status)
+	stored := repo.items[existing.ID().UUID()]
+	if stored.OrderName().String() != "ORD_2" || stored.Status() != domain.OrderStatusCompleted {
+		t.Errorf("order = %s/%v, want ORD_2/Completed", stored.OrderName(), stored.Status())
 	}
 	// Lines are not part of an update, so they survive it untouched.
 	if items := stored.Items(); len(items) != 1 {
@@ -396,7 +396,7 @@ func TestUpdateRejectsAnUnknownStatus(t *testing.T) {
 	handler := orders.NewUpdateOrderHandler(newFakeRepository(existing))
 
 	_, err := handler.Handle(t.Context(), orders.UpdateOrderCommand{
-		ID:              existing.ID.UUID(),
+		ID:              existing.ID().UUID(),
 		OrderName:       "ORD_1",
 		ShippingAddress: sampleAddress(),
 		BillingAddress:  sampleAddress(),
@@ -416,7 +416,7 @@ func TestDeleteRemovesTheOrder(t *testing.T) {
 	repo := newFakeRepository(existing)
 	handler := orders.NewDeleteOrderHandler(repo)
 
-	result, err := handler.Handle(t.Context(), orders.DeleteOrderCommand{ID: existing.ID.UUID()})
+	result, err := handler.Handle(t.Context(), orders.DeleteOrderCommand{ID: existing.ID().UUID()})
 	if err != nil {
 		t.Fatalf("deleting: %v", err)
 	}

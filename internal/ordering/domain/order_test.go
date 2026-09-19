@@ -58,8 +58,8 @@ func TestCreatingAnOrderRaisesOrderCreated(t *testing.T) {
 	if created.Order != order {
 		t.Error("the event should carry the order it describes")
 	}
-	if order.Status != domain.OrderStatusPending {
-		t.Errorf("status = %v, want Pending", order.Status)
+	if order.Status() != domain.OrderStatusPending {
+		t.Errorf("status = %v, want Pending", order.Status())
 	}
 }
 
@@ -99,8 +99,8 @@ func TestUpdateRaisesOrderUpdatedAndAppliesChanges(t *testing.T) {
 		t.Fatalf("updating: %v", err)
 	}
 
-	if order.OrderName.String() != "ORD_9" || order.Status != domain.OrderStatusCompleted {
-		t.Errorf("order = %s/%v, want the updated values", order.OrderName, order.Status)
+	if order.OrderName().String() != "ORD_9" || order.Status() != domain.OrderStatusCompleted {
+		t.Errorf("order = %s/%v, want the updated values", order.OrderName(), order.Status())
 	}
 
 	events := order.Events()
@@ -118,7 +118,7 @@ func TestUpdateRejectsAnUnknownStatus(t *testing.T) {
 	order := newOrder(t)
 	order.PullEvents()
 
-	err := order.Update(order.OrderName, order.ShippingAddress, order.BillingAddress, order.Payment, domain.OrderStatus(99))
+	err := order.Update(order.OrderName(), order.ShippingAddress(), order.BillingAddress(), order.Payment(), domain.OrderStatus(99))
 
 	if err == nil {
 		t.Fatal("an unknown status should be rejected")
@@ -236,8 +236,8 @@ func TestRestoreDoesNotRaiseEvents(t *testing.T) {
 	original.PullEvents()
 
 	restored := domain.Restore(
-		original.ID, original.CustomerID, original.OrderName,
-		original.ShippingAddress, original.BillingAddress, original.Payment,
+		original.ID(), original.CustomerID(), original.OrderName(),
+		original.ShippingAddress(), original.BillingAddress(), original.Payment(),
 		domain.OrderStatusCompleted, nil,
 	)
 
@@ -246,8 +246,8 @@ func TestRestoreDoesNotRaiseEvents(t *testing.T) {
 	if len(restored.Events()) != 0 {
 		t.Errorf("restoring raised %d events, want none", len(restored.Events()))
 	}
-	if restored.Status != domain.OrderStatusCompleted {
-		t.Errorf("status = %v, want the stored one", restored.Status)
+	if restored.Status() != domain.OrderStatusCompleted {
+		t.Errorf("status = %v, want the stored one", restored.Status())
 	}
 }
 
@@ -276,13 +276,13 @@ func TestAnUnpaidOrderStartsAsADraft(t *testing.T) {
 
 	// A checkout carries no card details, so the order it produces has none.
 	// The absence has to be a state the domain can express.
-	if !order.Payment.IsZero() {
+	if !order.Payment().IsZero() {
 		t.Error("an unpaid order should carry no payment")
 	}
 	// Draft rather than pending: nothing should treat it as confirmed until a
 	// payment is recorded against it.
-	if order.Status != domain.OrderStatusDraft {
-		t.Errorf("status = %v, want Draft", order.Status)
+	if order.Status() != domain.OrderStatusDraft {
+		t.Errorf("status = %v, want Draft", order.Status())
 	}
 	if len(order.Events()) != 1 {
 		t.Errorf("events = %d, want the pending OrderCreated", len(order.Events()))
@@ -294,10 +294,10 @@ func TestAPaidOrderIsNotMistakenForAnUnpaidOne(t *testing.T) {
 
 	order := newOrder(t)
 
-	if order.Payment.IsZero() {
+	if order.Payment().IsZero() {
 		t.Error("an order created with a payment should not read as unpaid")
 	}
-	if order.Status != domain.OrderStatusPending {
-		t.Errorf("status = %v, want Pending", order.Status)
+	if order.Status() != domain.OrderStatusPending {
+		t.Errorf("status = %v, want Pending", order.Status())
 	}
 }

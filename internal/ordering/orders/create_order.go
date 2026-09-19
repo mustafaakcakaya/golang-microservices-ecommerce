@@ -53,7 +53,7 @@ func (h *CreateOrderHandler) Handle(ctx context.Context, c CreateOrderCommand) (
 		return CreateOrderResult{}, err
 	}
 
-	return CreateOrderResult{ID: order.ID.UUID()}, nil
+	return CreateOrderResult{ID: order.ID().UUID()}, nil
 }
 
 // buildOrder turns the command into an aggregate.

@@ -43,12 +43,12 @@ func (r *OrderRepository) Save(ctx context.Context, order *domain.Order) error {
 		// Lines are replaced wholesale rather than diffed: the aggregate owns
 		// them, so the stored set is whatever it currently holds.
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM OrderItems WHERE OrderId = @p1`, asGUID(order.ID.UUID())); err != nil {
+			`DELETE FROM OrderItems WHERE OrderId = @p1`, asGUID(order.ID().UUID())); err != nil {
 			return fmt.Errorf("clearing order lines: %w", err)
 		}
 
 		for _, item := range order.Items() {
-			if err := insertOrderItem(ctx, tx, order.ID, item); err != nil {
+			if err := insertOrderItem(ctx, tx, order.ID(), item); err != nil {
 				return err
 			}
 		}
@@ -203,7 +203,7 @@ func (r *OrderRepository) collect(ctx context.Context, rows *sql.Rows) ([]*domai
 	// Lines are fetched per order. The page size is bounded, so this stays a
 	// small, predictable number of queries rather than one per row of a table.
 	for i, order := range orders {
-		items, err := r.itemsFor(ctx, order.ID)
+		items, err := r.itemsFor(ctx, order.ID())
 		if err != nil {
 			return nil, err
 		}
@@ -238,9 +238,9 @@ func (r *OrderRepository) itemsFor(ctx context.Context, id domain.OrderID) ([]do
 }
 
 func upsertOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
-	payment := order.Payment
-	shipping := order.ShippingAddress
-	billing := order.BillingAddress
+	payment := order.Payment()
+	shipping := order.ShippingAddress()
+	billing := order.BillingAddress()
 
 	// An unpaid order stores NULLs rather than empty strings, so "not paid
 	// for yet" cannot be mistaken for a card number nobody filled in.
@@ -281,7 +281,7 @@ func upsertOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
 		);`
 
 	_, err := tx.ExecContext(ctx, query,
-		asGUID(order.ID.UUID()), asGUID(order.CustomerID.UUID()), order.OrderName.String(), order.Status.String(),
+		asGUID(order.ID().UUID()), asGUID(order.CustomerID().UUID()), order.OrderName().String(), order.Status().String(),
 		shipping.FirstName, shipping.LastName, nullable(shipping.EmailAddress), shipping.AddressLine,
 		shipping.Country, shipping.State, shipping.ZipCode,
 		billing.FirstName, billing.LastName, nullable(billing.EmailAddress), billing.AddressLine,
@@ -290,9 +290,9 @@ func upsertOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
 	)
 	if err != nil {
 		if isForeignKeyViolation(err) {
-			return apperr.BadRequest("customer %s does not exist", order.CustomerID)
+			return apperr.BadRequest("customer %s does not exist", order.CustomerID())
 		}
-		return fmt.Errorf("saving order %s: %w", order.ID, err)
+		return fmt.Errorf("saving order %s: %w", order.ID(), err)
 	}
 
 	return nil

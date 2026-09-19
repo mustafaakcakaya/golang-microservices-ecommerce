@@ -76,12 +76,14 @@ func TestMain(m *testing.M) {
 			"MSSQL_PID":           "Developer",
 			"MSSQL_AGENT_ENABLED": "true",
 		}),
-		// WithWaitStrategyAndDeadline, not WithWaitStrategy: the latter caps
-		// the whole wait at a minute regardless of the strategy's own timeout.
-		// A first boot of a new major version upgrades the system databases,
-		// which takes longer than that when several containers do it at once.
+		// Two separate limits, and both default to a minute: the deadline
+		// around the whole wait, and the strategy's own startup timeout.
+		// Raising one leaves the other in place, so both are set. A first boot
+		// of a new major version upgrades the system databases, which takes
+		// longer than a minute when several containers do it at once.
 		testcontainers.WithWaitStrategyAndDeadline(5*time.Minute,
-			wait.ForLog("SQL Server is now ready for client connections"),
+			wait.ForLog("SQL Server is now ready for client connections").
+				WithStartupTimeout(5*time.Minute),
 		),
 	)
 	if err != nil {
@@ -262,19 +264,19 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 		t.Fatalf("saving: %v", err)
 	}
 
-	got, err := repo.ByID(t.Context(), order.ID)
+	got, err := repo.ByID(t.Context(), order.ID())
 	if err != nil {
 		t.Fatalf("loading: %v", err)
 	}
 
-	if got.OrderName.String() != "ORD_1" || got.Status != domain.OrderStatusPending {
-		t.Errorf("order = %s/%v, want ORD_1/Pending", got.OrderName, got.Status)
+	if got.OrderName().String() != "ORD_1" || got.Status() != domain.OrderStatusPending {
+		t.Errorf("order = %s/%v, want ORD_1/Pending", got.OrderName(), got.Status())
 	}
-	if got.ShippingAddress.AddressLine != "Test Address" {
-		t.Errorf("shipping address = %+v, want the stored one", got.ShippingAddress)
+	if got.ShippingAddress().AddressLine != "Test Address" {
+		t.Errorf("shipping address = %+v, want the stored one", got.ShippingAddress())
 	}
 	// Payment survives storage; it is redacted when rendered, not when stored.
-	if got.Payment.CardNumber() != cardNumber || got.Payment.CVV() != cvv {
+	if got.Payment().CardNumber() != cardNumber || got.Payment().CVV() != cvv {
 		t.Error("payment details did not round trip")
 	}
 
@@ -320,23 +322,23 @@ func TestAnOrderWithoutPaymentRoundTrips(t *testing.T) {
 		t.Fatalf("saving: %v", err)
 	}
 
-	got, err := repo.ByID(t.Context(), order.ID)
+	got, err := repo.ByID(t.Context(), order.ID())
 	if err != nil {
 		t.Fatalf("loading: %v", err)
 	}
 	// "Not paid for yet" has to survive storage as itself.
-	if !got.Payment.IsZero() {
-		t.Errorf("payment = %v, want none", got.Payment)
+	if !got.Payment().IsZero() {
+		t.Errorf("payment = %v, want none", got.Payment())
 	}
-	if got.Status != domain.OrderStatusDraft {
-		t.Errorf("status = %v, want Draft", got.Status)
+	if got.Status() != domain.OrderStatusDraft {
+		t.Errorf("status = %v, want Draft", got.Status())
 	}
 
 	// Stored as NULL rather than as empty strings, so a reader cannot mistake
 	// an unpaid order for one with blank card details.
 	var storedCard *string
 	if err := db.QueryRowContext(t.Context(),
-		`SELECT Payment_CardNumber FROM Orders WHERE Id = @p1`, order.ID.UUID()).Scan(&storedCard); err != nil {
+		`SELECT Payment_CardNumber FROM Orders WHERE Id = @p1`, order.ID().UUID()).Scan(&storedCard); err != nil {
 		t.Fatalf("reading the stored payment: %v", err)
 	}
 	if storedCard != nil {
@@ -383,7 +385,7 @@ func TestSavingReplacesLinesRatherThanAppending(t *testing.T) {
 		t.Fatalf("re-saving: %v", err)
 	}
 
-	got, err := repo.ByID(t.Context(), order.ID)
+	got, err := repo.ByID(t.Context(), order.ID())
 	if err != nil {
 		t.Fatalf("loading: %v", err)
 	}
@@ -416,7 +418,7 @@ func TestOrderAndLinesCommitTogether(t *testing.T) {
 	}
 
 	// The order must not survive its own failed save.
-	if _, err := repo.ByID(t.Context(), order.ID); apperr.KindOf(err) != apperr.KindNotFound {
+	if _, err := repo.ByID(t.Context(), order.ID()); apperr.KindOf(err) != apperr.KindNotFound {
 		t.Errorf("order was written despite the failure (error %v)", err)
 	}
 }
@@ -481,7 +483,7 @@ func TestByNameAndByCustomerFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("by name: %v", err)
 	}
-	if len(byName) != 1 || byName[0].OrderName.String() != "ORD_M" {
+	if len(byName) != 1 || byName[0].OrderName().String() != "ORD_M" {
 		t.Errorf("by name returned %d orders, want the one named ORD_M", len(byName))
 	}
 
@@ -489,7 +491,7 @@ func TestByNameAndByCustomerFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("by customer: %v", err)
 	}
-	if len(byCustomer) != 1 || byCustomer[0].CustomerID != mine {
+	if len(byCustomer) != 1 || byCustomer[0].CustomerID() != mine {
 		t.Errorf("by customer returned %d orders, want only this customer's", len(byCustomer))
 	}
 }
@@ -520,7 +522,7 @@ func TestByNameSearchesAndTreatsWildcardsLiterally(t *testing.T) {
 	if err != nil {
 		t.Fatalf("by name: %v", err)
 	}
-	if len(literal) != 1 || literal[0].OrderName.String() != "Q1_%B" {
+	if len(literal) != 1 || literal[0].OrderName().String() != "Q1_%B" {
 		t.Fatalf("searching %% returned %d orders, want only the one named with one", len(literal))
 	}
 }
@@ -540,14 +542,14 @@ func TestDeleteRemovesTheOrderAndItsLines(t *testing.T) {
 		t.Fatalf("saving: %v", err)
 	}
 
-	if err := repo.Delete(t.Context(), order.ID); err != nil {
+	if err := repo.Delete(t.Context(), order.ID()); err != nil {
 		t.Fatalf("deleting: %v", err)
 	}
 
 	// Lines have no life without their order, so the cascade must take them.
 	var remaining int
 	if err := db.QueryRowContext(t.Context(),
-		`SELECT count(*) FROM OrderItems WHERE OrderId = @p1`, order.ID.UUID()).Scan(&remaining); err != nil {
+		`SELECT count(*) FROM OrderItems WHERE OrderId = @p1`, order.ID().UUID()).Scan(&remaining); err != nil {
 		t.Fatalf("counting lines: %v", err)
 	}
 	if remaining != 0 {
@@ -556,7 +558,7 @@ func TestDeleteRemovesTheOrderAndItsLines(t *testing.T) {
 
 	// Deleting an order that is gone is an error here: the caller asked to
 	// remove something specific that was not there.
-	if err := repo.Delete(t.Context(), order.ID); apperr.KindOf(err) != apperr.KindNotFound {
+	if err := repo.Delete(t.Context(), order.ID()); apperr.KindOf(err) != apperr.KindNotFound {
 		t.Errorf("second delete = %v, want NotFound", err)
 	}
 }
@@ -612,7 +614,7 @@ func TestSavingAnOrderCommitsItsOutboxMessageWithIt(t *testing.T) {
 		t.Fatalf("saving: %v", err)
 	}
 
-	messages := outboxFor(t, order.ID)
+	messages := outboxFor(t, order.ID())
 	if len(messages) != 1 {
 		t.Fatalf("outbox rows = %d, want the single OrderCreated", len(messages))
 	}
@@ -658,7 +660,7 @@ func TestAFailedSaveLeavesNoOutboxMessage(t *testing.T) {
 
 	// This is the guarantee the outbox exists for: no message survives a
 	// change that did not.
-	if messages := outboxFor(t, order.ID); len(messages) != 0 {
+	if messages := outboxFor(t, order.ID()); len(messages) != 0 {
 		t.Errorf("outbox rows = %d, want none for a rolled-back save", len(messages))
 	}
 	// The events stay on the aggregate, so a retry still announces the change.
@@ -686,8 +688,8 @@ func TestUpdatingAnOrderAppendsAnUpdateMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("order name: %v", err)
 	}
-	if err := order.Update(name, order.ShippingAddress, order.BillingAddress,
-		order.Payment, domain.OrderStatusCompleted); err != nil {
+	if err := order.Update(name, order.ShippingAddress(), order.BillingAddress(),
+		order.Payment(), domain.OrderStatusCompleted); err != nil {
 		t.Fatalf("updating: %v", err)
 	}
 	if err := repo.Save(t.Context(), order); err != nil {
@@ -695,7 +697,7 @@ func TestUpdatingAnOrderAppendsAnUpdateMessage(t *testing.T) {
 	}
 
 	// The outbox is append-only, so the history of what was announced stays.
-	messages := outboxFor(t, order.ID)
+	messages := outboxFor(t, order.ID())
 	if len(messages) != 2 {
 		t.Fatalf("outbox rows = %d, want the create and the update", len(messages))
 	}
