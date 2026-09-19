@@ -26,7 +26,11 @@ import (
 
 const (
 	cardNumber = "5555555555554444"
-	cvv        = "355"
+	// Letters outside the hex range, so the value cannot occur by chance in a
+	// UUID, a timestamp or a duration. Three digits such as "355" do, and a
+	// leak check searching for them fails for the wrong reason a few percent
+	// of the time. The domain accepts any three characters.
+	cvv = "zqx"
 )
 
 // One SQL Server is shared by the whole package. It takes tens of seconds to
