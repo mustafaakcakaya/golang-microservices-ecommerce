@@ -9,6 +9,15 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+func init() {
+	// Money goes on the wire as a JSON number, matching Catalog and Ordering.
+	// shopspring/decimal decides this through a package-level global that
+	// defaults to a quoted string, so without this the same price would be a
+	// number from one service and a string from another - and every client
+	// would have to handle both.
+	decimal.MarshalJSONWithoutQuotes = true
+}
+
 // ShoppingCart is one user's basket. The user name is the identity: a user has
 // exactly one basket, and storing replaces it.
 type ShoppingCart struct {

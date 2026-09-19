@@ -113,8 +113,9 @@ func TestCartSerializesTotalPrice(t *testing.T) {
 	if !ok {
 		t.Fatalf("totalPrice missing from %s", encoded)
 	}
-	if total != "1400" {
-		t.Errorf("totalPrice = %v, want 1400", total)
+	// A JSON number, like every other price in this API.
+	if total != float64(1400) {
+		t.Errorf("totalPrice = %#v, want the number 1400", total)
 	}
 }
 
@@ -205,14 +206,14 @@ func TestRoutes(t *testing.T) {
 
 		var response struct {
 			Cart struct {
-				UserName   string `json:"userName"`
-				TotalPrice string `json:"totalPrice"`
+				UserName   string  `json:"userName"`
+				TotalPrice float64 `json:"totalPrice"`
 			} `json:"cart"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 			t.Fatalf("decoding: %v", err)
 		}
-		if response.Cart.UserName != "mustafa" || response.Cart.TotalPrice != "1400" {
+		if response.Cart.UserName != "mustafa" || response.Cart.TotalPrice != 1400 {
 			t.Errorf("cart = %+v, want mustafa with total 1400", response.Cart)
 		}
 	})
@@ -261,4 +262,19 @@ func TestRoutes(t *testing.T) {
 			t.Errorf("status = %d, want 200", rec.Code)
 		}
 	})
+}
+
+func TestPricesAreNumbersOnTheWire(t *testing.T) {
+	t.Parallel()
+
+	body, err := json.Marshal(sampleCart("mustafa"))
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+
+	// A quoted price here and a bare one from Catalog would make every client
+	// handle two shapes for the same field, decided by which service answered.
+	if strings.Contains(string(body), `"price":"`) || strings.Contains(string(body), `"totalPrice":"`) {
+		t.Errorf("body = %s, want unquoted prices", body)
+	}
 }
