@@ -207,3 +207,36 @@ func TestBasketsAreIsolatedPerUser(t *testing.T) {
 		t.Errorf("john's basket = %+v, want it untouched", john.Items)
 	}
 }
+
+func TestEveryWriteGivesTheBasketANewVersion(t *testing.T) {
+	repo := newRepository(t)
+	ctx := context.Background()
+
+	basket := cart("versioned", item("iPhone X", 1, 500))
+	if err := repo.Store(ctx, basket); err != nil {
+		t.Fatalf("storing: %v", err)
+	}
+	first, err := repo.GetByUserName(ctx, "versioned")
+	if err != nil {
+		t.Fatalf("loading: %v", err)
+	}
+	if first.Version == uuid.Nil {
+		t.Fatal("a stored basket should have a version")
+	}
+
+	if err := repo.Store(ctx, basket); err != nil {
+		t.Fatalf("re-storing: %v", err)
+	}
+	second, err := repo.GetByUserName(ctx, "versioned")
+	if err != nil {
+		t.Fatalf("loading again: %v", err)
+	}
+
+	// A checkout derives its message id from the version. If a rewritten
+	// basket kept the old one, checking out again would produce an id a
+	// consumer has already seen and the second order would be dropped as a
+	// duplicate.
+	if second.Version == first.Version {
+		t.Error("rewriting the basket should change its version")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
 	"github.com/testcontainers/testcontainers-go"
@@ -277,5 +278,34 @@ func TestDatabaseErrorsPassThrough(t *testing.T) {
 
 	if _, err := repo.GetByUserName(context.Background(), "mustafa"); !errors.Is(err, failure) {
 		t.Errorf("error = %v, want the database error to surface unchanged", err)
+	}
+}
+
+func TestTheCachedBasketKeepsItsVersion(t *testing.T) {
+	client := newRedis(t)
+
+	stored := sampleCart("versioned")
+	stored.Version = uuid.New()
+
+	inner := newCountingRepository(stored)
+	repo := rediscache.NewCachedRepository(inner, client, time.Minute, discardLogger())
+	ctx := context.Background()
+
+	// The first read populates the cache; the second is served from it.
+	if _, err := repo.GetByUserName(ctx, "versioned"); err != nil {
+		t.Fatalf("first read: %v", err)
+	}
+	cached, err := repo.GetByUserName(ctx, "versioned")
+	if err != nil {
+		t.Fatalf("second read: %v", err)
+	}
+	if inner.reads != 1 {
+		t.Fatalf("inner reads = %d, want the second read served from the cache", inner.reads)
+	}
+
+	// A checkout derives its message id from the version, so losing it on a
+	// cache hit would quietly change what a double click does.
+	if cached.Version != stored.Version {
+		t.Errorf("version = %s, want %s", cached.Version, stored.Version)
 	}
 }

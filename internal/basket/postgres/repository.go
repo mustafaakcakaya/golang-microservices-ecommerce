@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -29,10 +30,13 @@ func NewBasketRepository(pool *pgxpool.Pool) *BasketRepository {
 
 // GetByUserName loads a basket, reporting not found when the user has none.
 func (r *BasketRepository) GetByUserName(ctx context.Context, userName string) (carts.ShoppingCart, error) {
-	const query = `SELECT items FROM baskets WHERE user_name = $1`
+	const query = `SELECT items, version FROM baskets WHERE user_name = $1`
 
-	var rawItems []byte
-	err := r.pool.QueryRow(ctx, query, userName).Scan(&rawItems)
+	var (
+		rawItems []byte
+		version  uuid.UUID
+	)
+	err := r.pool.QueryRow(ctx, query, userName).Scan(&rawItems, &version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return carts.ShoppingCart{}, apperr.NotFound("Basket", userName)
 	}
@@ -45,16 +49,18 @@ func (r *BasketRepository) GetByUserName(ctx context.Context, userName string) (
 		return carts.ShoppingCart{}, fmt.Errorf("decoding basket %q: %w", userName, err)
 	}
 
-	return carts.ShoppingCart{UserName: userName, Items: items}, nil
+	return carts.ShoppingCart{UserName: userName, Items: items, Version: version}, nil
 }
 
 // Store writes the basket, replacing any existing one for that user.
 func (r *BasketRepository) Store(ctx context.Context, cart carts.ShoppingCart) error {
+	// A new version on every write, so two requests reading the same basket
+	// see the same value and a later write is recognisably a different basket.
 	const query = `
-		INSERT INTO baskets (user_name, items, updated_at)
-		VALUES ($1, $2, now())
+		INSERT INTO baskets (user_name, items, version, updated_at)
+		VALUES ($1, $2, $3, now())
 		ON CONFLICT (user_name) DO UPDATE
-		SET items = EXCLUDED.items, updated_at = now()`
+		SET items = EXCLUDED.items, version = EXCLUDED.version, updated_at = now()`
 
 	items := cart.Items
 	if items == nil {
@@ -66,7 +72,7 @@ func (r *BasketRepository) Store(ctx context.Context, cart carts.ShoppingCart) e
 		return fmt.Errorf("encoding basket %q: %w", cart.UserName, err)
 	}
 
-	if _, err := r.pool.Exec(ctx, query, cart.UserName, encoded); err != nil {
+	if _, err := r.pool.Exec(ctx, query, cart.UserName, encoded, uuid.New()); err != nil {
 		return fmt.Errorf("storing basket %q: %w", cart.UserName, err)
 	}
 

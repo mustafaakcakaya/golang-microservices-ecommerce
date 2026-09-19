@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/carts"
@@ -58,10 +59,10 @@ func (r *CachedRepository) GetByUserName(ctx context.Context, userName string) (
 	cached, err := r.client.Get(ctx, key(userName)).Bytes()
 	switch {
 	case err == nil:
-		var cart carts.ShoppingCart
-		if err := json.Unmarshal(cached, &cart); err == nil {
+		var entry storedCart
+		if err := json.Unmarshal(cached, &entry); err == nil {
 			r.log.DebugContext(ctx, "basket cache hit", "userName", userName)
-			return cart, nil
+			return entry.cart(), nil
 		}
 		// A corrupt entry is not worth failing over; fall through to the database.
 		r.log.WarnContext(ctx, "discarding unreadable cached basket", "userName", userName)
@@ -118,7 +119,7 @@ func (r *CachedRepository) Delete(ctx context.Context, userName string) error {
 }
 
 func (r *CachedRepository) set(ctx context.Context, cart carts.ShoppingCart) error {
-	encoded, err := json.Marshal(cart)
+	encoded, err := json.Marshal(entryOf(cart))
 	if err != nil {
 		return fmt.Errorf("encoding basket for cache: %w", err)
 	}
@@ -127,3 +128,23 @@ func (r *CachedRepository) set(ctx context.Context, cart carts.ShoppingCart) err
 }
 
 func key(userName string) string { return keyPrefix + userName }
+
+// storedCart is how a basket is kept in the cache.
+//
+// The cart's own JSON form is the wire format, and that deliberately hides the
+// version, so caching the cart as a client sees it would lose the version on
+// every cache hit - and a checkout served from cache would derive its message
+// id from nothing.
+type storedCart struct {
+	UserName string                   `json:"userName"`
+	Version  uuid.UUID                `json:"version"`
+	Items    []carts.ShoppingCartItem `json:"items"`
+}
+
+func entryOf(cart carts.ShoppingCart) storedCart {
+	return storedCart{UserName: cart.UserName, Version: cart.Version, Items: cart.Items}
+}
+
+func (s storedCart) cart() carts.ShoppingCart {
+	return carts.ShoppingCart{UserName: s.UserName, Items: s.Items, Version: s.Version}
+}

@@ -23,6 +23,12 @@ func init() {
 type ShoppingCart struct {
 	UserName string             `json:"userName" validate:"required"`
 	Items    []ShoppingCartItem `json:"items"`
+
+	// Version identifies this exact basket and changes on every write. It is
+	// storage's own bookkeeping, not part of the wire format, so a client
+	// neither sends it nor sees it - but a checkout derives its message id
+	// from it, which is what stops a double click becoming two orders.
+	Version uuid.UUID `json:"-"`
 }
 
 // ShoppingCartItem is a single line in the basket.
