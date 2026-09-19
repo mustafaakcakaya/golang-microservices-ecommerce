@@ -16,7 +16,6 @@ import (
 func Router(
 	repo carts.Repository,
 	discounts carts.DiscountLookup,
-	announcer carts.Announcer,
 	checks *health.Registry,
 	log *slog.Logger,
 ) http.Handler {
@@ -27,7 +26,7 @@ func Router(
 
 	r.Get("/health", checks.Handler())
 
-	carts.RegisterRoutes(r, repo, discounts, announcer, log)
+	carts.RegisterRoutes(r, repo, discounts, log)
 
 	return r
 }

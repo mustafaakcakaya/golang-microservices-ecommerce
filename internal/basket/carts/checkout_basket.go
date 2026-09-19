@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"strings"
+
 	"github.com/google/uuid"
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/apperr"
@@ -12,14 +14,6 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/basketv1"
 )
-
-// Announcer publishes a checkout so other services can act on it.
-//
-// Narrower than the full publisher on purpose: this package sends and never
-// receives, and the interface says so.
-type Announcer interface {
-	Publish(ctx context.Context, envelope messaging.Envelope) error
-}
 
 // CheckoutBasketCommand turns a stored basket into a checkout.
 //
@@ -44,27 +38,22 @@ type CheckoutBasketResult struct {
 	IsSuccess bool
 }
 
-// CheckoutBasketHandler announces the checkout and clears the basket.
+// CheckoutBasketHandler records the checkout and clears the basket.
 type CheckoutBasketHandler struct {
-	repo      Repository
-	announcer Announcer
+	repo Repository
 }
 
 // NewCheckoutBasketHandler wires the handler.
-func NewCheckoutBasketHandler(repo Repository, announcer Announcer) *CheckoutBasketHandler {
-	return &CheckoutBasketHandler{repo: repo, announcer: announcer}
+func NewCheckoutBasketHandler(repo Repository) *CheckoutBasketHandler {
+	return &CheckoutBasketHandler{repo: repo}
 }
 
 // Handle implements cqrs.Handler.
 //
-// TODO: move this to the outbox pattern, the way Ordering already publishes.
-// Announcing and clearing the basket are two writes to two systems with no
-// transaction around them, which is the problem the outbox exists to solve:
-// if the delete fails after the message went out, the basket survives and a
-// retry publishes a second checkout under a new message id - one the consumer's
-// inbox cannot recognise as a duplicate, so the customer gets two orders. The
-// order here is deliberate: publishing first risks that duplicate, while
-// deleting first would risk losing the checkout entirely.
+// Nothing is published here. The basket is cleared and the announcement is
+// recorded in one transaction, and the relay publishes what was recorded: a
+// broker outage then delays the announcement instead of failing a checkout
+// whose database work was fine.
 func (h *CheckoutBasketHandler) Handle(
 	ctx context.Context, c CheckoutBasketCommand,
 ) (CheckoutBasketResult, error) {
@@ -78,20 +67,38 @@ func (h *CheckoutBasketHandler) Handle(
 		return CheckoutBasketResult{}, apperr.BadRequest("the basket of %s is empty", c.UserName)
 	}
 
-	envelope, err := messaging.NewEnvelope(checkoutEvent(ctx, c, cart), c.CustomerID.String())
+	event := checkoutEvent(ctx, c, cart)
+	// Derived rather than random: two requests racing on the same basket agree
+	// on one id, so a double click records one message and produces one order.
+	event.ID = CheckoutID(c.UserName, cart.Version)
+
+	announcement, err := messaging.NewEnvelope(event, c.CustomerID.String())
 	if err != nil {
 		return CheckoutBasketResult{}, err
 	}
 
-	if err := h.announcer.Publish(ctx, envelope); err != nil {
-		return CheckoutBasketResult{}, err
-	}
-
-	if err := h.repo.Delete(ctx, c.UserName); err != nil {
+	if err := h.repo.Checkout(ctx, c.UserName, announcement); err != nil {
 		return CheckoutBasketResult{}, err
 	}
 
 	return CheckoutBasketResult{IsSuccess: true}, nil
+}
+
+// checkoutNamespace names the ids derived below. It is fixed: changing it
+// would give every basket a new checkout id and break the deduplication it
+// exists for.
+var checkoutNamespace = uuid.MustParse("3b7f0c52-9a1e-4d63-8f2b-6c4e1a0d9b75")
+
+// CheckoutID derives a checkout's message id from the user and the exact
+// basket being checked out.
+//
+// The id travels to the broker and is what a consumer deduplicates on, so it
+// has to be the same for two attempts at the same basket and different for a
+// basket that was filled again afterwards.
+func CheckoutID(userName string, basketVersion uuid.UUID) uuid.UUID {
+	name := userName + ":" + strings.ReplaceAll(basketVersion.String(), "-", "")
+
+	return uuid.NewSHA1(checkoutNamespace, []byte(name))
 }
 
 // checkoutEvent maps the command and the stored basket onto the contract.

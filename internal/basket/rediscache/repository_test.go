@@ -17,6 +17,7 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/carts"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/rediscache"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/apperr"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
 )
 
 // countingRepository records how often the inner repository is reached, which
@@ -54,6 +55,18 @@ func (r *countingRepository) Store(_ context.Context, cart carts.ShoppingCart) e
 		return r.failOn
 	}
 	r.items[cart.UserName] = cart
+	return nil
+}
+
+func (r *countingRepository) Checkout(
+	_ context.Context, userName string, _ messaging.Envelope,
+) error {
+	r.writes++
+	if r.failOn != nil {
+		return r.failOn
+	}
+	delete(r.items, userName)
+
 	return nil
 }
 

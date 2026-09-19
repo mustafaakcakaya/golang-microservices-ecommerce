@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
 )
 
 func init() {
@@ -69,4 +71,8 @@ type Repository interface {
 	GetByUserName(ctx context.Context, userName string) (ShoppingCart, error)
 	Store(ctx context.Context, cart ShoppingCart) error
 	Delete(ctx context.Context, userName string) error
+
+	// Checkout clears the basket and records the announcement in the same
+	// transaction, so a checkout either happens completely or not at all.
+	Checkout(ctx context.Context, userName string, announcement messaging.Envelope) error
 }

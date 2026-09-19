@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,6 +20,7 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/api"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/carts"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/discountclient"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/outbox"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/postgres"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/rediscache"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/health"
@@ -118,15 +120,45 @@ func run(log *slog.Logger) error {
 	registry := messaging.NewRegistry()
 	basketv1.Register(registry)
 
-	announcer, err := broker.New(brokerConfig, registry)
+	publisher, err := broker.New(brokerConfig, registry)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = announcer.Close() }()
+	defer func() { _ = publisher.Close() }()
+
+	// Nothing publishes during a request: a checkout is recorded in the same
+	// transaction that clears the basket, and this relay is what gets it to
+	// the broker afterwards.
+	relay := outbox.NewRelay(postgres.NewOutboxStore(pool), publisher, outbox.DefaultOptions(), log)
 
 	log.Info("basket configured", "broker", brokerConfig.Provider)
 
-	return httpx.Run(ctx, addr, api.Router(repo, discounts, announcer, checks, log), log)
+	return serveAndRelay(ctx, addr, api.Router(repo, discounts, checks, log), relay, log)
+}
+
+// serveAndRelay runs the API and the outbox relay together, stopping both as
+// soon as one of them stops.
+func serveAndRelay(
+	ctx context.Context, addr string, router http.Handler, relay *outbox.Relay, log *slog.Logger,
+) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	relayErr := make(chan error, 1)
+	go func() {
+		relayErr <- relay.Run(ctx)
+		// Accepting checkouts nothing will publish is worse than not
+		// accepting them.
+		cancel()
+	}()
+
+	serveErr := httpx.Run(ctx, addr, router, log)
+
+	if err := <-relayErr; err != nil {
+		return err
+	}
+
+	return serveErr
 }
 
 // grpcHealthy asks the Discount service's standard health service whether it is

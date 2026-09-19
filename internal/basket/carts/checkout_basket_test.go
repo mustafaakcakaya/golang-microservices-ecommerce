@@ -1,7 +1,6 @@
 package carts_test
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -13,21 +12,6 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/basketv1"
 )
-
-// fakeAnnouncer stands in for the broker.
-type fakeAnnouncer struct {
-	published []messaging.Envelope
-	failWith  error
-}
-
-func (a *fakeAnnouncer) Publish(_ context.Context, envelope messaging.Envelope) error {
-	if a.failWith != nil {
-		return a.failWith
-	}
-	a.published = append(a.published, envelope)
-
-	return nil
-}
 
 func checkoutCommand(userName string) carts.CheckoutBasketCommand {
 	return carts.CheckoutBasketCommand{
@@ -43,17 +27,16 @@ func checkoutCommand(userName string) carts.CheckoutBasketCommand {
 	}
 }
 
-func TestCheckoutAnnouncesTheBasketAndClearsIt(t *testing.T) {
+func TestCheckoutRecordsTheAnnouncementAndClearsTheBasket(t *testing.T) {
 	t.Parallel()
 
 	// Kept rather than rebuilt: sampleCart draws fresh product ids each call.
 	basket := sampleCart("mustafa")
+	basket.Version = uuid.New()
 	repo := newFakeRepository(basket)
-	announcer := &fakeAnnouncer{}
-	handler := carts.NewCheckoutBasketHandler(repo, announcer)
+	handler := carts.NewCheckoutBasketHandler(repo)
 
-	command := checkoutCommand("mustafa")
-	result, err := handler.Handle(t.Context(), command)
+	result, err := handler.Handle(t.Context(), checkoutCommand("mustafa"))
 	if err != nil {
 		t.Fatalf("checking out: %v", err)
 	}
@@ -61,16 +44,16 @@ func TestCheckoutAnnouncesTheBasketAndClearsIt(t *testing.T) {
 		t.Error("the checkout reported no success")
 	}
 
-	if len(announcer.published) != 1 {
-		t.Fatalf("published %d messages, want one", len(announcer.published))
+	if len(repo.recorded) != 1 {
+		t.Fatalf("recorded %d announcements, want one", len(repo.recorded))
 	}
-	envelope := announcer.published[0]
-	if envelope.Contract != (basketv1.CheckoutRequested{}).Contract() {
-		t.Errorf("contract = %v, want basket.checkout-requested v1", envelope.Contract)
+	announcement := repo.recorded[0]
+	if announcement.Contract != (basketv1.CheckoutRequested{}).Contract() {
+		t.Errorf("contract = %v, want basket.checkout-requested v1", announcement.Contract)
 	}
 
 	var event basketv1.CheckoutRequested
-	if err := messaging.Unmarshal(envelope.Payload, &event); err != nil {
+	if err := messaging.Unmarshal(announcement.Payload, &event); err != nil {
 		t.Fatalf("decoding the payload: %v", err)
 	}
 	// The order is built from what was in the basket, so every line has to
@@ -89,44 +72,87 @@ func TestCheckoutAnnouncesTheBasketAndClearsIt(t *testing.T) {
 		t.Errorf("total = %s, want the basket total", event.TotalPrice)
 	}
 
-	// The basket is gone: a checked-out basket that survives would be
-	// checked out again.
+	// The basket is gone: one that survived would be checked out again.
 	if _, err := repo.GetByUserName(t.Context(), "mustafa"); apperr.KindOf(err) != apperr.KindNotFound {
 		t.Errorf("the basket survived the checkout (error %v)", err)
 	}
 }
 
-func TestAFailedAnnouncementKeepsTheBasket(t *testing.T) {
+func TestTheSameBasketCheckedOutTwiceKeepsOneMessageID(t *testing.T) {
+	t.Parallel()
+
+	version := uuid.New()
+
+	first := carts.CheckoutID("mustafa", version)
+	again := carts.CheckoutID("mustafa", version)
+	// Two requests racing on the same basket derive the same id, so the
+	// second records nothing new and the customer gets one order.
+	if first != again {
+		t.Errorf("the same basket derived %s and %s", first, again)
+	}
+
+	// A basket filled again afterwards is a different basket. If it derived
+	// the old id, a consumer deduplicating on it would drop the new order as
+	// a repeat of the old one.
+	if refilled := carts.CheckoutID("mustafa", uuid.New()); refilled == first {
+		t.Error("a new basket version should derive a new id")
+	}
+	if other := carts.CheckoutID("someone-else", version); other == first {
+		t.Error("another user's basket should derive a different id")
+	}
+}
+
+func TestTheRecordedIDIsDerivedFromTheBasket(t *testing.T) {
+	t.Parallel()
+
+	basket := sampleCart("mustafa")
+	basket.Version = uuid.New()
+	repo := newFakeRepository(basket)
+	handler := carts.NewCheckoutBasketHandler(repo)
+
+	if _, err := handler.Handle(t.Context(), checkoutCommand("mustafa")); err != nil {
+		t.Fatalf("checking out: %v", err)
+	}
+
+	// The recorded id is what reaches the broker as the message id, so the
+	// derivation has to survive all the way into the outbox row.
+	want := carts.CheckoutID("mustafa", basket.Version)
+	if repo.recorded[0].ID != want {
+		t.Errorf("recorded id = %s, want %s", repo.recorded[0].ID, want)
+	}
+}
+
+func TestAFailedCheckoutLeavesTheBasketAlone(t *testing.T) {
 	t.Parallel()
 
 	repo := newFakeRepository(sampleCart("mustafa"))
-	announcer := &fakeAnnouncer{failWith: errors.New("the broker is unreachable")}
-	handler := carts.NewCheckoutBasketHandler(repo, announcer)
+	repo.failCheckout = errors.New("the database is unreachable")
+	handler := carts.NewCheckoutBasketHandler(repo)
 
 	if _, err := handler.Handle(t.Context(), checkoutCommand("mustafa")); err == nil {
-		t.Fatal("a checkout that could not be announced should fail")
+		t.Fatal("a checkout that could not be recorded should fail")
 	}
 
-	// Clearing a basket nobody was told about would lose the order outright,
-	// which is worse than asking the customer to try again.
+	// Clearing a basket whose announcement was not recorded would lose the
+	// order outright, which is worse than asking the customer to try again.
 	if _, err := repo.GetByUserName(t.Context(), "mustafa"); err != nil {
-		t.Errorf("the basket was cleared even though nothing was announced: %v", err)
+		t.Errorf("the basket was cleared even though nothing was recorded: %v", err)
 	}
 }
 
 func TestCheckingOutAnUnknownBasketIsNotFound(t *testing.T) {
 	t.Parallel()
 
-	announcer := &fakeAnnouncer{}
-	handler := carts.NewCheckoutBasketHandler(newFakeRepository(), announcer)
+	repo := newFakeRepository()
+	handler := carts.NewCheckoutBasketHandler(repo)
 
 	_, err := handler.Handle(t.Context(), checkoutCommand("nobody"))
 
 	if got := apperr.KindOf(err); got != apperr.KindNotFound {
 		t.Fatalf("kind = %v, want KindNotFound (error %v)", got, err)
 	}
-	if len(announcer.published) != 0 {
-		t.Error("nothing should be announced for a basket that does not exist")
+	if len(repo.recorded) != 0 {
+		t.Error("nothing should be recorded for a basket that does not exist")
 	}
 }
 
@@ -135,8 +161,7 @@ func TestCheckingOutAnEmptyBasketIsRefused(t *testing.T) {
 
 	empty := carts.ShoppingCart{UserName: "mustafa", Items: []carts.ShoppingCartItem{}}
 	repo := newFakeRepository(empty)
-	announcer := &fakeAnnouncer{}
-	handler := carts.NewCheckoutBasketHandler(repo, announcer)
+	handler := carts.NewCheckoutBasketHandler(repo)
 
 	_, err := handler.Handle(t.Context(), checkoutCommand("mustafa"))
 
@@ -144,17 +169,16 @@ func TestCheckingOutAnEmptyBasketIsRefused(t *testing.T) {
 	if got := apperr.KindOf(err); got != apperr.KindBadRequest {
 		t.Fatalf("kind = %v, want KindBadRequest (error %v)", got, err)
 	}
-	if len(announcer.published) != 0 {
+	if len(repo.recorded) != 0 {
 		t.Error("an empty basket should not be announced")
 	}
 }
 
-func TestTheAnnouncedMessageCarriesNoCardDetails(t *testing.T) {
+func TestTheRecordedMessageCarriesNoCardDetails(t *testing.T) {
 	t.Parallel()
 
 	repo := newFakeRepository(sampleCart("mustafa"))
-	announcer := &fakeAnnouncer{}
-	handler := carts.NewCheckoutBasketHandler(repo, announcer)
+	handler := carts.NewCheckoutBasketHandler(repo)
 
 	if _, err := handler.Handle(t.Context(), checkoutCommand("mustafa")); err != nil {
 		t.Fatalf("checking out: %v", err)
@@ -162,10 +186,10 @@ func TestTheAnnouncedMessageCarriesNoCardDetails(t *testing.T) {
 
 	// The command has nowhere to put card details, so this is really a guard
 	// against someone adding one later.
-	payload := strings.ToLower(string(announcer.published[0].Payload))
+	payload := strings.ToLower(string(repo.recorded[0].Payload))
 	for _, banned := range []string{"card", "cvv", "cvc"} {
 		if strings.Contains(payload, banned) {
-			t.Errorf("the announced payload mentions %q: %s", banned, payload)
+			t.Errorf("the recorded payload mentions %q: %s", banned, payload)
 		}
 	}
 }

@@ -23,6 +23,16 @@ import (
 func newRepository(t *testing.T) *postgres.BasketRepository {
 	t.Helper()
 
+	repo, _ := newRepositoryWithPool(t)
+
+	return repo
+}
+
+// newRepositoryWithPool also hands back the pool, for tests that read what the
+// repository wrote through another store.
+func newRepositoryWithPool(t *testing.T) (*postgres.BasketRepository, *pgxpool.Pool) {
+	t.Helper()
+
 	if testing.Short() {
 		t.Skip("skipping test that needs Docker")
 	}
@@ -65,7 +75,7 @@ func newRepository(t *testing.T) *postgres.BasketRepository {
 		t.Fatalf("migrating: %v", err)
 	}
 
-	return postgres.NewBasketRepository(pool)
+	return postgres.NewBasketRepository(pool), pool
 }
 
 func cart(userName string, items ...carts.ShoppingCartItem) carts.ShoppingCart {

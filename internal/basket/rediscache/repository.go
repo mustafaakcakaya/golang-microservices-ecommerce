@@ -14,6 +14,7 @@ import (
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/carts"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/apperr"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
 )
 
 // DefaultTTL bounds how long a cached basket may live.
@@ -113,6 +114,26 @@ func (r *CachedRepository) Delete(ctx context.Context, userName string) error {
 
 	if err := r.client.Del(ctx, key(userName)).Err(); err != nil {
 		return apperr.Internal(err, "basket was deleted but its cache entry could not be removed")
+	}
+
+	return nil
+}
+
+// Checkout clears the basket and its cache entry.
+//
+// The transaction belongs to the database underneath; the cache is refreshed
+// after it commits. A failure to evict is reported rather than swallowed: a
+// surviving entry would keep serving a basket that has already been checked
+// out, and the customer would check it out again.
+func (r *CachedRepository) Checkout(
+	ctx context.Context, userName string, announcement messaging.Envelope,
+) error {
+	if err := r.inner.Checkout(ctx, userName, announcement); err != nil {
+		return err
+	}
+
+	if err := r.client.Del(ctx, key(userName)).Err(); err != nil {
+		return apperr.Internal(err, "the basket was checked out but its cache entry could not be removed")
 	}
 
 	return nil

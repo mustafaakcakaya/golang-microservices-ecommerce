@@ -1,6 +1,11 @@
 package messaging
 
-import "context"
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"time"
+)
 
 // Delivery is what a handler does with one received message.
 //
@@ -25,4 +30,54 @@ type Subscriber interface {
 
 	// Close releases the connection.
 	Close() error
+}
+
+// stopped reports whether the service has been asked to shut down.
+func stopped(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+// resubscribe bounds how quickly a dropped subscription is reopened.
+const (
+	resubscribeBaseDelay = time.Second
+	resubscribeMaxDelay  = 30 * time.Second
+)
+
+// KeepSubscribed reopens a subscription whenever it drops, until the context
+// is cancelled.
+//
+// A broker that goes away is an outage, not a reason for a service to stop. A
+// service that died with it would also stop answering the requests it can
+// still serve - reads do not need the broker - and would need something
+// outside to notice and restart it. The messages wait in the broker meanwhile.
+func KeepSubscribed(ctx context.Context, subscriber Subscriber, deliver Delivery, log *slog.Logger) error {
+	for attempt := 1; ; attempt++ {
+		err := subscriber.Subscribe(ctx, deliver)
+
+		// Checked before the error: a subscription that ended because the
+		// service is shutting down is a clean stop.
+		if stopped(ctx) {
+			return nil
+		}
+		if err == nil {
+			// A clean return without a cancelled context means the broker
+			// closed the subscription; open it again.
+			err = errors.New("the subscription ended")
+		}
+
+		delay := min(resubscribeBaseDelay<<min(attempt-1, 5), resubscribeMaxDelay)
+		log.WarnContext(ctx, "the subscription dropped; reopening it",
+			"error", err, "retryIn", delay)
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(delay):
+		}
+	}
 }

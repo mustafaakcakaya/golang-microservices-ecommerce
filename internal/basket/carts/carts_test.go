@@ -16,12 +16,17 @@ import (
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/carts"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/apperr"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
 )
 
 // fakeRepository keeps baskets in memory so handler behaviour can be checked
 // without Docker; the PostgreSQL implementation has its own integration tests.
 type fakeRepository struct {
-	items map[string]carts.ShoppingCart
+	items    map[string]carts.ShoppingCart
+	recorded []messaging.Envelope
+
+	// failCheckout stands in for a database that refuses the transaction.
+	failCheckout error
 }
 
 func newFakeRepository(seed ...carts.ShoppingCart) *fakeRepository {
@@ -47,6 +52,24 @@ func (r *fakeRepository) Store(_ context.Context, cart carts.ShoppingCart) error
 
 func (r *fakeRepository) Delete(_ context.Context, userName string) error {
 	delete(r.items, userName)
+	return nil
+}
+
+// Checkout stands in for the transaction: the basket goes and the
+// announcement is recorded, or neither happens.
+func (r *fakeRepository) Checkout(
+	_ context.Context, userName string, announcement messaging.Envelope,
+) error {
+	if _, held := r.items[userName]; !held {
+		return apperr.NotFound("Basket", userName)
+	}
+	if r.failCheckout != nil {
+		return r.failCheckout
+	}
+
+	delete(r.items, userName)
+	r.recorded = append(r.recorded, announcement)
+
 	return nil
 }
 
@@ -186,7 +209,7 @@ func TestRoutes(t *testing.T) {
 
 	repo := newFakeRepository(sampleCart("mustafa"))
 	router := chi.NewRouter()
-	carts.RegisterRoutes(router, repo, noDiscounts(), &fakeAnnouncer{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	carts.RegisterRoutes(router, repo, noDiscounts(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	do := func(t *testing.T, method, target, body string) *httptest.ResponseRecorder {
 		t.Helper()

@@ -146,8 +146,10 @@ func serveAndSubscribe(
 
 	subscribeErr := make(chan error, 1)
 	go func() {
-		subscribeErr <- subscriber.Subscribe(ctx, deliver)
-		// The API alone cannot take checkouts, so it does not outlive them.
+		// Reopened whenever it drops: a broker outage must not stop the
+		// service from answering the requests it can still serve, and the
+		// checkouts wait in the broker until it is listening again.
+		subscribeErr <- messaging.KeepSubscribed(ctx, subscriber, deliver, log)
 		cancel()
 	}()
 

@@ -12,7 +12,7 @@ import (
 type routeLogger = *slog.Logger
 
 // RegisterRoutes mounts every basket slice on r.
-func RegisterRoutes(r chi.Router, repo Repository, discounts DiscountLookup, announcer Announcer, log *slog.Logger) {
+func RegisterRoutes(r chi.Router, repo Repository, discounts DiscountLookup, log *slog.Logger) {
 	getBasket := cqrs.Chain[GetBasketQuery, GetBasketResult](
 		NewGetBasketHandler(repo),
 		cqrs.Logging[GetBasketQuery, GetBasketResult](log, "GetBasket"),
@@ -23,7 +23,7 @@ func RegisterRoutes(r chi.Router, repo Repository, discounts DiscountLookup, ann
 		cqrs.Validating[StoreBasketCommand, StoreBasketResult](),
 	)
 	checkoutBasket := cqrs.Chain[CheckoutBasketCommand, CheckoutBasketResult](
-		NewCheckoutBasketHandler(repo, announcer),
+		NewCheckoutBasketHandler(repo),
 		cqrs.Logging[CheckoutBasketCommand, CheckoutBasketResult](log, "CheckoutBasket"),
 		cqrs.Validating[CheckoutBasketCommand, CheckoutBasketResult](),
 	)
