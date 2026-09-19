@@ -185,7 +185,7 @@ func TestRoutes(t *testing.T) {
 
 	repo := newFakeRepository(sampleCart("mustafa"))
 	router := chi.NewRouter()
-	carts.RegisterRoutes(router, repo, noDiscounts(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	carts.RegisterRoutes(router, repo, noDiscounts(), &fakeAnnouncer{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	do := func(t *testing.T, method, target, body string) *httptest.ResponseRecorder {
 		t.Helper()

@@ -23,6 +23,9 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/basket/rediscache"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/health"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/httpx"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/basketv1"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/broker"
 )
 
 const defaultAddr = ":8080"
@@ -104,7 +107,26 @@ func run(log *slog.Logger) error {
 
 	repo = rediscache.NewCachedRepository(repo, client, cacheTTL(), log)
 
-	return httpx.Run(ctx, addr, api.Router(repo, discounts, checks, log), log)
+	// The broker is required too: checking out is the point of a basket, and a
+	// service that accepted checkouts it could not announce would lose them
+	// silently.
+	brokerConfig, err := broker.ConfigFromEnv()
+	if err != nil {
+		return err
+	}
+
+	registry := messaging.NewRegistry()
+	basketv1.Register(registry)
+
+	announcer, err := broker.New(brokerConfig, registry)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = announcer.Close() }()
+
+	log.Info("basket configured", "broker", brokerConfig.Provider)
+
+	return httpx.Run(ctx, addr, api.Router(repo, discounts, announcer, checks, log), log)
 }
 
 // grpcHealthy asks the Discount service's standard health service whether it is

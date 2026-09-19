@@ -197,6 +197,10 @@ services:
       - BASKET_DATABASE_URL=postgres://postgres:postgres@basketdb:5432/basket?sslmode=disable
       - BASKET_REDIS_URL=redis://distributedcache:6379/0
       - BASKET_DISCOUNT_GRPC_ADDR=discount:8080
+      # Checking out announces the basket, so Basket needs the broker too.
+      - MESSAGE_BROKER_PROVIDER=${MESSAGE_BROKER_PROVIDER:-rabbitmq}
+      - MESSAGE_BROKER_RABBITMQ_URL=amqp://guest:guest@messagebroker:5672/
+      - MESSAGE_BROKER_KAFKA_BROKERS=kafka:29092
     depends_on:
       basketdb:
         condition: service_healthy
@@ -204,6 +208,8 @@ services:
         condition: service_healthy
       discount:
         # Basket refuses to start without Discount, so it waits for it.
+        condition: service_healthy
+      messagebroker:
         condition: service_healthy
     ports:
       - "${BASKET_PORT:-6101}:8080"

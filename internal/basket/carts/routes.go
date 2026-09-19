@@ -12,7 +12,7 @@ import (
 type routeLogger = *slog.Logger
 
 // RegisterRoutes mounts every basket slice on r.
-func RegisterRoutes(r chi.Router, repo Repository, discounts DiscountLookup, log *slog.Logger) {
+func RegisterRoutes(r chi.Router, repo Repository, discounts DiscountLookup, announcer Announcer, log *slog.Logger) {
 	getBasket := cqrs.Chain[GetBasketQuery, GetBasketResult](
 		NewGetBasketHandler(repo),
 		cqrs.Logging[GetBasketQuery, GetBasketResult](log, "GetBasket"),
@@ -22,6 +22,11 @@ func RegisterRoutes(r chi.Router, repo Repository, discounts DiscountLookup, log
 		cqrs.Logging[StoreBasketCommand, StoreBasketResult](log, "StoreBasket"),
 		cqrs.Validating[StoreBasketCommand, StoreBasketResult](),
 	)
+	checkoutBasket := cqrs.Chain[CheckoutBasketCommand, CheckoutBasketResult](
+		NewCheckoutBasketHandler(repo, announcer),
+		cqrs.Logging[CheckoutBasketCommand, CheckoutBasketResult](log, "CheckoutBasket"),
+		cqrs.Validating[CheckoutBasketCommand, CheckoutBasketResult](),
+	)
 	deleteBasket := cqrs.Chain[DeleteBasketCommand, DeleteBasketResult](
 		NewDeleteBasketHandler(repo),
 		cqrs.Logging[DeleteBasketCommand, DeleteBasketResult](log, "DeleteBasket"),
@@ -30,6 +35,8 @@ func RegisterRoutes(r chi.Router, repo Repository, discounts DiscountLookup, log
 
 	r.Route("/basket", func(r chi.Router) {
 		r.Post("/", StoreBasketRoute(storeBasket, log))
+		// Before the {userName} parameter, so a checkout is not read as a user.
+		r.Post("/checkout", CheckoutBasketRoute(checkoutBasket, log))
 		r.Get("/{userName}", GetBasketRoute(getBasket, log))
 		r.Delete("/{userName}", DeleteBasketRoute(deleteBasket, log))
 	})

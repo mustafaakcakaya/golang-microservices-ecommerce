@@ -13,7 +13,13 @@ import (
 )
 
 // Router builds the service's HTTP handler.
-func Router(repo carts.Repository, discounts carts.DiscountLookup, checks *health.Registry, log *slog.Logger) http.Handler {
+func Router(
+	repo carts.Repository,
+	discounts carts.DiscountLookup,
+	announcer carts.Announcer,
+	checks *health.Registry,
+	log *slog.Logger,
+) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -21,7 +27,7 @@ func Router(repo carts.Repository, discounts carts.DiscountLookup, checks *healt
 
 	r.Get("/health", checks.Handler())
 
-	carts.RegisterRoutes(r, repo, discounts, log)
+	carts.RegisterRoutes(r, repo, discounts, announcer, log)
 
 	return r
 }
