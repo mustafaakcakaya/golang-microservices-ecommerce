@@ -13,6 +13,8 @@ problem calls for.
 | Discount | Coupons | SQLite, over gRPC | ready |
 | Ordering | Order lifecycle | SQL Server | ready |
 | ordering-worker | Publishes outbox messages | — | ready |
+| gateway | One public address, rate limited at the edge | — | ready |
+| web | React storefront, talks only to the gateway | — | ready |
 
 ## Architectural approaches
 
@@ -48,6 +50,7 @@ the worker.
 
 ```
 cmd/           one main package per service
+web/           React storefront (Vite, TypeScript)
 internal/
   platform/    shared code (cqrs, apperr, pagination, validation, httpx, health)
   catalog/  basket/  discount/
@@ -73,9 +76,10 @@ this stage.
 docker compose -f deploy/compose.yaml up --build
 ```
 
-Service addresses: Catalog `6100`, Basket `6101`, Discount `6102` (gRPC),
-Ordering `6103`, ordering-worker `6104` (health only). RabbitMQ's management UI
-is on `15682`. Ports can be changed with environment variables; see the table at
+Open the storefront on <http://localhost:6106>. It talks only to the gateway on
+`6105`; the services keep their own ports for local work - Catalog `6100`,
+Basket `6101`, Discount `6102` (gRPC), Ordering `6103`, ordering-worker `6104`
+(health only). RabbitMQ's management UI is on `15682`. Ports can be changed with environment variables; see the table at
 the top of `deploy/compose.yaml`.
 
 To run against Kafka instead:
@@ -88,6 +92,19 @@ Dependencies are deliberately required rather than optional: Basket will not
 start without Redis or Discount. A missing cache would quietly become slowness
 and a missing discount service would quietly become the wrong price - both of
 which are noticed long after a deploy.
+
+## The storefront
+
+```bash
+cd web
+npm install
+npm run dev     # with the stack running; /api is forwarded to the gateway
+npm run build   # type check and produce the static files nginx serves
+```
+
+The checkout form asks for an address and nothing else. The message Basket
+publishes carries no card details and the order it produces starts out unpaid,
+so collecting them would mean holding card data for no purpose.
 
 ## Development
 

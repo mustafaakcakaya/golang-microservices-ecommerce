@@ -17,6 +17,7 @@
 #   6003   ->   6103   ordering service
 #   6004   ->   6104   ordering worker (health only)
 #   6005   ->   6105   api gateway
+#   6006   ->   6106   storefront
 #   5672   ->   5682   rabbitmq
 #  15672   ->  15682   rabbitmq management ui
 #   9092   ->   9192   kafka (profile: kafka)
@@ -285,7 +286,10 @@ services:
       - GATEWAY_CATALOG_URL=http://catalog:8080
       - GATEWAY_BASKET_URL=http://basket:8080
       - GATEWAY_ORDERING_URL=http://ordering:8080
-      - GATEWAY_RATE_LIMIT=${GATEWAY_RATE_LIMIT:-5}
+      # Every storefront request reaches the gateway from one address - the
+      # storefront's own nginx - so the per-caller limit applies to the whole
+      # shop at once. Five would stop a single page from loading.
+      - GATEWAY_RATE_LIMIT=${GATEWAY_RATE_LIMIT:-60}
       - GATEWAY_RATE_WINDOW=${GATEWAY_RATE_WINDOW:-10s}
     depends_on:
       # Started after them for readable logs; the gateway answers with a 502
@@ -295,6 +299,16 @@ services:
       - ordering
     ports:
       - "${GATEWAY_PORT:-6105}:8080"
+
+  web:
+    container_name: go-web
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    depends_on:
+      - gateway
+    ports:
+      - "${WEB_PORT:-6106}:8080"
 
 volumes:
   postgres_catalog:
