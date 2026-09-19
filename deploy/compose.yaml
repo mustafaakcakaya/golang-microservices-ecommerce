@@ -16,6 +16,7 @@
 #   6002   ->   6102   discount service (gRPC)
 #   6003   ->   6103   ordering service
 #   6004   ->   6104   ordering worker (health only)
+#   6005   ->   6105   api gateway
 #   5672   ->   5682   rabbitmq
 #  15672   ->  15682   rabbitmq management ui
 #   9092   ->   9192   kafka (profile: kafka)
@@ -270,6 +271,30 @@ services:
         condition: service_started
     ports:
       - "${ORDERING_WORKER_PORT:-6104}:8080"
+
+  gateway:
+    container_name: go-gateway
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        SERVICE: gateway
+    environment:
+      - GATEWAY_HTTP_ADDR=:8080
+      # Only what is listed here is reachable from outside.
+      - GATEWAY_CATALOG_URL=http://catalog:8080
+      - GATEWAY_BASKET_URL=http://basket:8080
+      - GATEWAY_ORDERING_URL=http://ordering:8080
+      - GATEWAY_RATE_LIMIT=${GATEWAY_RATE_LIMIT:-5}
+      - GATEWAY_RATE_WINDOW=${GATEWAY_RATE_WINDOW:-10s}
+    depends_on:
+      # Started after them for readable logs; the gateway answers with a 502
+      # for whatever is not up yet rather than refusing to start.
+      - catalog
+      - basket
+      - ordering
+    ports:
+      - "${GATEWAY_PORT:-6105}:8080"
 
 volumes:
   postgres_catalog:
