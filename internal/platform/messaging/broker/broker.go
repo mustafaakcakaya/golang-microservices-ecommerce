@@ -9,6 +9,7 @@ package broker
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -83,6 +84,42 @@ func New(config Config, registry *messaging.Registry) (messaging.Publisher, erro
 		return rabbitmq.New(config.RabbitMQ, registry), nil
 	case ProviderKafka:
 		return kafka.New(config.Kafka, registry), nil
+	default:
+		return nil, unknownProvider(config.Provider)
+	}
+}
+
+// NewSubscriber builds the subscriber the configuration selects.
+//
+// The consumer name becomes the queue on RabbitMQ and the group on Kafka. Both
+// mean the same thing: instances sharing it divide the work, and a different
+// name gets its own copy of every message.
+func NewSubscriber(
+	config Config, consumer string, contracts []messaging.Contract, log *slog.Logger,
+) (messaging.Subscriber, error) {
+	if err := config.validate(); err != nil {
+		return nil, err
+	}
+	if consumer == "" {
+		return nil, errors.New("a subscriber needs a consumer name")
+	}
+	if len(contracts) == 0 {
+		return nil, errors.New("a subscriber needs at least one contract to subscribe to")
+	}
+
+	switch config.Provider {
+	case ProviderRabbitMQ:
+		return rabbitmq.NewSubscriber(rabbitmq.SubscriberConfig{
+			Config:    config.RabbitMQ,
+			Queue:     consumer,
+			Contracts: contracts,
+		}, log), nil
+	case ProviderKafka:
+		return kafka.NewSubscriber(kafka.SubscriberConfig{
+			Config:    config.Kafka,
+			Group:     consumer,
+			Contracts: contracts,
+		}, log), nil
 	default:
 		return nil, unknownProvider(config.Provider)
 	}

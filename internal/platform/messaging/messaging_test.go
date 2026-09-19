@@ -9,7 +9,10 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/broker"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/kafka"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv1"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/rabbitmq"
 )
 
 func sampleEvent() *orderingv1.OrderCreated {
@@ -23,6 +26,33 @@ func sampleEvent() *orderingv1.OrderCreated {
 		Items: []orderingv1.Line{
 			{ProductID: uuid.New(), Quantity: 2, Price: messaging.NewMoney(decimal.RequireFromString("500.25"))},
 		},
+	}
+}
+
+// sampleEnvelope is a published-ready envelope for one sample event.
+func sampleEnvelope(t *testing.T) messaging.Envelope {
+	t.Helper()
+
+	event := sampleEvent()
+
+	envelope, err := messaging.NewEnvelope(event, event.OrderID.String())
+	if err != nil {
+		t.Fatalf("enveloping: %v", err)
+	}
+
+	return envelope
+}
+
+// rabbitConfig and kafkaConfig keep the broker packages out of the other tests
+// in this package, which need no container at all.
+func rabbitConfig(url string) rabbitmq.Config {
+	return rabbitmq.Config{URL: url}
+}
+
+func kafkaConfig(addresses []string) broker.Config {
+	return broker.Config{
+		Provider: broker.ProviderKafka,
+		Kafka:    kafka.Config{Brokers: addresses, TopicPrefix: "test."},
 	}
 }
 
