@@ -88,7 +88,7 @@ func newRedis(t *testing.T) redis.UniversalClient {
 
 	ctx := context.Background()
 
-	container, err := tcredis.Run(ctx, "redis:7-alpine")
+	container, err := tcredis.Run(ctx, "redis:8-alpine")
 	if err != nil {
 		t.Fatalf("starting redis: %v", err)
 	}

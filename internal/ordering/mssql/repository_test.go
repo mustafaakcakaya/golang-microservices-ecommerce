@@ -66,7 +66,7 @@ func TestMain(m *testing.M) {
 
 	ctx := context.Background()
 
-	container, err := tcmssql.Run(ctx, "mcr.microsoft.com/mssql/server:2022-latest",
+	container, err := tcmssql.Run(ctx, "mcr.microsoft.com/mssql/server:2025-latest",
 		tcmssql.WithAcceptEULA(),
 		tcmssql.WithPassword("Str0ng!Passw0rd"),
 		testcontainers.WithEnv(map[string]string{

@@ -39,7 +39,7 @@ func newRepositoryWithPool(t *testing.T) (*postgres.ProductRepository, *pgxpool.
 
 	ctx := context.Background()
 
-	container, err := tcpostgres.Run(ctx, "postgres:16-alpine",
+	container, err := tcpostgres.Run(ctx, "postgres:18-alpine",
 		tcpostgres.WithDatabase("catalog"),
 		tcpostgres.WithUsername("postgres"),
 		tcpostgres.WithPassword("postgres"),

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
+	"time"
 
 	"github.com/pressly/goose/v3"
 
@@ -86,7 +88,22 @@ func masterDSN(parsed *url.URL) string {
 	return admin.String()
 }
 
+// agentStartAttempts and agentStartInterval bound how long Migrate waits for
+// SQL Server Agent: about a minute, which covers a slow start on a busy host
+// without hiding a server whose agent never comes up.
+const (
+	agentStartAttempts = 30
+	agentStartInterval = 2 * time.Second
+)
+
 // Migrate applies pending migrations.
+//
+// Enabling change data capture registers jobs with SQL Server Agent, and the
+// server accepts logins before its agent has finished starting. A migration
+// that arrives in that window is refused with "try again later", so that is
+// what happens here - and only for that refusal. Retrying is safe: a migration
+// that failed part way is not recorded as applied, and every statement in the
+// capture migration is guarded, so running it again from the top is harmless.
 func Migrate(ctx context.Context, db *sql.DB) error {
 	goose.SetBaseFS(migrations)
 	goose.SetLogger(goose.NopLogger())
@@ -95,9 +112,31 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("setting migration dialect: %w", err)
 	}
 
-	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
-		return fmt.Errorf("applying migrations: %w", err)
-	}
+	for attempt := 1; ; attempt++ {
+		err := goose.UpContext(ctx, db, "migrations")
+		if err == nil {
+			return nil
+		}
+		if !agentStarting(err) || attempt == agentStartAttempts {
+			return fmt.Errorf("applying migrations: %w", err)
+		}
 
-	return nil
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("applying migrations: %w", ctx.Err())
+		case <-time.After(agentStartInterval):
+		}
+	}
+}
+
+// agentStartingError is SQL Server's number for refusing a job operation while
+// its agent is still starting.
+const agentStartingError = "14258"
+
+// agentStarting reports whether err is that refusal.
+//
+// The number cannot be read from the driver's error: the capture procedures
+// wrap it, so what comes back is 22832, with 14258 only inside the message.
+func agentStarting(err error) bool {
+	return strings.Contains(err.Error(), agentStartingError)
 }

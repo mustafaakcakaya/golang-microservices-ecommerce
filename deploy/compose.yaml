@@ -25,7 +25,7 @@
 
 services:
   catalogdb:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: go-catalogdb
     environment:
       - POSTGRES_USER=postgres
@@ -35,7 +35,10 @@ services:
     ports:
       - "${CATALOG_DB_PORT:-5442}:5432"
     volumes:
-      - postgres_catalog:/var/lib/postgresql/data
+      # PostgreSQL 18 keeps its data in a version-named directory under
+      # /var/lib/postgresql, so that is what gets mounted. The pre-18 path,
+      # /var/lib/postgresql/data, makes an 18 container refuse to start.
+      - postgres_catalog:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d catalog"]
       interval: 5s
@@ -43,7 +46,7 @@ services:
       retries: 10
 
   basketdb:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: go-basketdb
     environment:
       - POSTGRES_USER=postgres
@@ -53,7 +56,7 @@ services:
     ports:
       - "${BASKET_DB_PORT:-5443}:5432"
     volumes:
-      - postgres_basket:/var/lib/postgresql/data
+      - postgres_basket:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d basket"]
       interval: 5s
@@ -61,7 +64,7 @@ services:
       retries: 10
 
   orderingdb:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: mcr.microsoft.com/mssql/server:2025-latest
     container_name: go-orderingdb
     environment:
       - ACCEPT_EULA=Y
@@ -127,7 +130,7 @@ services:
       retries: 15
 
   distributedcache:
-    image: redis:7-alpine
+    image: redis:8-alpine
     container_name: go-distributedcache
     restart: always
     ports:
