@@ -73,6 +73,7 @@ func routesFromEnv() ([]gateway.Route, error) {
 		{"/catalog-service", "GATEWAY_CATALOG_URL"},
 		{"/basket-service", "GATEWAY_BASKET_URL"},
 		{"/ordering-service", "GATEWAY_ORDERING_URL"},
+		{"/payment-service", "GATEWAY_PAYMENT_URL"},
 	}
 
 	var routes []gateway.Route
