@@ -11,7 +11,7 @@ import (
 func delivery(headers amqp.Table) amqp.Delivery {
 	return amqp.Delivery{
 		MessageId:     uuid.NewString(),
-		Type:          "basket.checkout-requested",
+		Type:          "basket.checkout-submitted",
 		CorrelationId: "trace-1",
 		Timestamp:     time.Now(),
 		Body:          []byte(`{}`),

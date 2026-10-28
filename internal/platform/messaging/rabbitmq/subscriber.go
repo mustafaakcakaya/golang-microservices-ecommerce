@@ -42,6 +42,19 @@ type Subscriber struct {
 
 	connection *amqp.Connection
 	channel    *amqp.Channel
+
+	// rejects is a second channel, in confirm mode, for moving rejected
+	// messages aside. The consuming channel cannot be put in confirm mode
+	// without every acknowledgement on it waiting behind publishes.
+	rejects *amqp.Channel
+}
+
+// ErrorQueue is where a consumer's rejected messages are kept.
+//
+// The suffix is the one operators already look for: a queue named after the
+// consumer with _error on the end holds what that consumer gave up on.
+func ErrorQueue(queue string) string {
+	return queue + "_error"
 }
 
 // NewSubscriber wires the subscriber. Nothing is dialled yet.
@@ -86,7 +99,7 @@ func (s *Subscriber) Close() error {
 	}
 
 	err := s.connection.Close()
-	s.channel, s.connection = nil, nil
+	s.channel, s.rejects, s.connection = nil, nil, nil
 
 	if err != nil && !errors.Is(err, amqp.ErrClosed) {
 		return fmt.Errorf("closing rabbitmq connection: %w", err)
@@ -109,6 +122,11 @@ func (s *Subscriber) handle(ctx context.Context, delivery amqp.Delivery, deliver
 	}
 
 	if err := deliver(ctx, envelope); err != nil {
+		if messaging.IsRejected(err) {
+			s.setAside(ctx, delivery, err)
+			return
+		}
+
 		s.log.ErrorContext(ctx, "handling a message failed; it will be delivered again",
 			"messageId", envelope.ID, "contract", envelope.Contract.String(), "error", err)
 
@@ -126,6 +144,75 @@ func (s *Subscriber) handle(ctx context.Context, delivery amqp.Delivery, deliver
 		s.log.WarnContext(ctx, "could not acknowledge a handled message",
 			"messageId", envelope.ID, "error", err)
 	}
+}
+
+// setAside moves a rejected message to the consumer's error queue.
+//
+// The copy is confirmed by the broker before the original is acknowledged, so
+// a crash in between leaves the message in one queue or both, never in
+// neither. A copy in both is harmless: the error queue is read by people, not
+// by this consumer.
+func (s *Subscriber) setAside(ctx context.Context, delivery amqp.Delivery, reason error) {
+	errorQueue := ErrorQueue(s.config.Queue)
+
+	if err := s.publishRejected(ctx, errorQueue, delivery, reason); err != nil {
+		s.log.ErrorContext(ctx, "could not set a rejected message aside; it will be delivered again",
+			"messageId", delivery.MessageId, "queue", errorQueue, "error", err)
+
+		time.Sleep(redeliveryDelay)
+		_ = delivery.Nack(false, true)
+
+		return
+	}
+
+	s.log.ErrorContext(ctx, "rejected a message; it was moved to the error queue",
+		"messageId", delivery.MessageId, "type", delivery.Type, "queue", errorQueue, "error", reason)
+
+	if err := delivery.Ack(false); err != nil {
+		s.log.WarnContext(ctx, "could not acknowledge a rejected message",
+			"messageId", delivery.MessageId, "error", err)
+	}
+}
+
+// publishRejected copies a delivery to the error queue and waits for the
+// broker to confirm it.
+func (s *Subscriber) publishRejected(
+	ctx context.Context, errorQueue string, delivery amqp.Delivery, reason error,
+) error {
+	headers := amqp.Table{}
+	for key, value := range delivery.Headers {
+		headers[key] = value
+	}
+	// Why it was given up on, next to the message itself, so whoever reads
+	// the error queue does not have to search the logs for it.
+	headers["rejection-reason"] = reason.Error()
+
+	confirmation, err := s.rejects.PublishWithDeferredConfirmWithContext(
+		ctx, "", errorQueue, false, false,
+		amqp.Publishing{
+			MessageId:     delivery.MessageId,
+			CorrelationId: delivery.CorrelationId,
+			Type:          delivery.Type,
+			Timestamp:     delivery.Timestamp,
+			ContentType:   delivery.ContentType,
+			DeliveryMode:  amqp.Persistent,
+			Headers:       headers,
+			Body:          delivery.Body,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("publishing to %s: %w", errorQueue, err)
+	}
+
+	acked, err := confirmation.WaitContext(ctx)
+	if err != nil {
+		return fmt.Errorf("waiting for %s to confirm: %w", errorQueue, err)
+	}
+	if !acked {
+		return fmt.Errorf("rabbitmq refused the copy for %s", errorQueue)
+	}
+
+	return nil
 }
 
 // envelopeFrom rebuilds the envelope the publisher sent.
@@ -218,6 +305,23 @@ func (s *Subscriber) open() (<-chan amqp.Delivery, error) {
 		return nil, fmt.Errorf("declaring queue %s: %w", s.config.Queue, err)
 	}
 
+	// Bound to nothing: only this consumer writes to it, when it gives up on
+	// a message, and only a person reads from it.
+	if _, err := channel.QueueDeclare(ErrorQueue(s.config.Queue), true, false, false, false, nil); err != nil {
+		_ = connection.Close()
+		return nil, fmt.Errorf("declaring queue %s: %w", ErrorQueue(s.config.Queue), err)
+	}
+
+	rejects, err := connection.Channel()
+	if err != nil {
+		_ = connection.Close()
+		return nil, fmt.Errorf("opening rabbitmq channel for rejected messages: %w", err)
+	}
+	if err := rejects.Confirm(false); err != nil {
+		_ = connection.Close()
+		return nil, fmt.Errorf("enabling confirms for rejected messages: %w", err)
+	}
+
 	for _, contract := range s.config.Contracts {
 		if err := channel.QueueBind(s.config.Queue, contract.EventType, s.config.Exchange, false, nil); err != nil {
 			_ = connection.Close()
@@ -238,7 +342,7 @@ func (s *Subscriber) open() (<-chan amqp.Delivery, error) {
 		return nil, fmt.Errorf("consuming from %s: %w", s.config.Queue, err)
 	}
 
-	s.connection, s.channel = connection, channel
+	s.connection, s.channel, s.rejects = connection, channel, rejects
 
 	return deliveries, nil
 }

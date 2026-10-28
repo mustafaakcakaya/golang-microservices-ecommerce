@@ -20,6 +20,9 @@ const (
 	SchemaVersionHeader = "schema-version"
 	CorrelationIDHeader = "correlation-id"
 	OccurredOnHeader    = "occurred-on-utc"
+
+	// RejectionReasonHeader is added to a message a consumer set aside.
+	RejectionReasonHeader = "rejection-reason"
 )
 
 // Config describes how to reach the cluster.

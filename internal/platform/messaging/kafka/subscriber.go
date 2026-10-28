@@ -31,6 +31,14 @@ type Subscriber struct {
 	config SubscriberConfig
 	log    *slog.Logger
 	reader *kafkago.Reader
+
+	// rejects writes messages the handler gave up on to a topic of their own.
+	rejects *kafkago.Writer
+}
+
+// RejectedTopic is where a topic's rejected messages are kept.
+func RejectedTopic(topic string) string {
+	return topic + ".rejected"
 }
 
 // NewSubscriber wires the subscriber.
@@ -50,7 +58,17 @@ func NewSubscriber(config SubscriberConfig, log *slog.Logger) *Subscriber {
 		StartOffset: kafkago.FirstOffset,
 	})
 
-	return &Subscriber{config: config, log: log, reader: reader}
+	rejects := &kafkago.Writer{
+		Addr: kafkago.TCP(config.Brokers...),
+		// The same key keeps a rejected message next to the rest of its
+		// aggregate's history, and the same acks keep it as durable as the
+		// message it replaces.
+		Balancer:               &kafkago.Hash{},
+		RequiredAcks:           kafkago.RequireAll,
+		AllowAutoTopicCreation: true,
+	}
+
+	return &Subscriber{config: config, log: log, reader: reader, rejects: rejects}
 }
 
 // Subscribe consumes until the context is cancelled.
@@ -88,7 +106,23 @@ func (s *Subscriber) Subscribe(ctx context.Context, deliver messaging.Delivery) 
 			// while one message is stuck at its head.
 			s.log.ErrorContext(ctx, "skipping an unreadable message",
 				"topic", message.Topic, "offset", message.Offset, "error", err)
-		} else if err := deliver(ctx, envelope); err != nil {
+		} else if err := deliver(ctx, envelope); err != nil && messaging.IsRejected(err) {
+			// A partition is a sequence, so a message that can never succeed
+			// would stop everything behind it. It is copied aside and then
+			// committed past like any handled message.
+			if err := s.setAside(ctx, message, err); err != nil {
+				s.log.ErrorContext(ctx, "could not set a rejected message aside; it will be read again",
+					"messageId", envelope.ID, "error", err)
+
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(time.Second):
+				}
+
+				continue
+			}
+		} else if err != nil {
 			s.log.ErrorContext(ctx, "handling a message failed; it will be read again",
 				"messageId", envelope.ID, "contract", envelope.Contract.String(), "error", err)
 
@@ -116,10 +150,43 @@ func (s *Subscriber) Subscribe(ctx context.Context, deliver messaging.Delivery) 
 	}
 }
 
-// Close releases the reader.
+// setAside copies a rejected message to its topic's rejected topic.
+//
+// It returns only once the cluster has the copy, so committing past the
+// original afterwards cannot lose it.
+func (s *Subscriber) setAside(ctx context.Context, message kafkago.Message, reason error) error {
+	topic := RejectedTopic(message.Topic)
+
+	headers := make([]kafkago.Header, 0, len(message.Headers)+1)
+	headers = append(headers, message.Headers...)
+	// Why it was given up on, next to the message itself.
+	headers = append(headers, kafkago.Header{Key: RejectionReasonHeader, Value: []byte(reason.Error())})
+
+	if err := s.rejects.WriteMessages(ctx, kafkago.Message{
+		Topic:   topic,
+		Key:     message.Key,
+		Value:   message.Value,
+		Headers: headers,
+	}); err != nil {
+		return fmt.Errorf("writing to %s: %w", topic, err)
+	}
+
+	s.log.ErrorContext(ctx, "rejected a message; it was moved to the rejected topic",
+		"topic", message.Topic, "offset", message.Offset, "rejectedTopic", topic, "error", reason)
+
+	return nil
+}
+
+// Close releases the reader and the writer for rejected messages.
 func (s *Subscriber) Close() error {
-	if err := s.reader.Close(); err != nil {
-		return fmt.Errorf("closing kafka reader: %w", err)
+	readerErr := s.reader.Close()
+	writerErr := s.rejects.Close()
+
+	if readerErr != nil {
+		return fmt.Errorf("closing kafka reader: %w", readerErr)
+	}
+	if writerErr != nil {
+		return fmt.Errorf("closing kafka writer for rejected messages: %w", writerErr)
 	}
 
 	return nil

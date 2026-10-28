@@ -10,8 +10,41 @@ import (
 // Delivery is what a handler does with one received message.
 //
 // Returning an error means the message was not handled: the subscriber leaves
-// it with the broker to be delivered again rather than acknowledging it.
+// it with the broker to be delivered again rather than acknowledging it. An
+// error wrapped with Reject is the exception - see there.
 type Delivery func(ctx context.Context, envelope Envelope) error
+
+// rejection marks a message that can never be handled.
+type rejection struct {
+	err error
+}
+
+func (r *rejection) Error() string { return "message rejected: " + r.err.Error() }
+
+func (r *rejection) Unwrap() error { return r.err }
+
+// Reject marks a message as one that will never succeed, however often it is
+// delivered: its content contradicts itself, say, rather than a dependency
+// being down.
+//
+// Retrying such a message forever would hold up everything queued behind it,
+// so the subscriber sets it aside instead - where the broker can keep it, in a
+// queue of its own a person can inspect - and moves on. Use it only for
+// failures that are a property of the message; a transient failure returned
+// this way is a lost message.
+func Reject(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return &rejection{err: err}
+}
+
+// IsRejected reports whether err, or anything it wraps, came from Reject.
+func IsRejected(err error) bool {
+	var rejected *rejection
+	return errors.As(err, &rejected)
+}
 
 // Subscriber receives messages from a broker and hands them to a Delivery.
 //

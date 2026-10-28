@@ -2,6 +2,8 @@ package messaging_test
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -184,4 +186,24 @@ func TestRegisteringOneContractTwiceIsAWiringMistake(t *testing.T) {
 	}()
 
 	orderingv1.Register(registry)
+}
+
+func TestARejectionIsRecognisedThroughWrapping(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("the total does not match the lines")
+	wrapped := fmt.Errorf("handling checkout: %w", messaging.Reject(cause))
+
+	if !messaging.IsRejected(wrapped) {
+		t.Error("a wrapped rejection should still be recognised")
+	}
+	if !errors.Is(wrapped, cause) {
+		t.Error("the rejection should keep its cause reachable")
+	}
+	if messaging.IsRejected(cause) {
+		t.Error("an ordinary error is not a rejection")
+	}
+	if messaging.Reject(nil) != nil {
+		t.Error("rejecting nothing should be nothing")
+	}
 }

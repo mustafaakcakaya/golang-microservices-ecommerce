@@ -4,17 +4,21 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	amqp "github.com/rabbitmq/amqp091-go"
 	kafkago "github.com/segmentio/kafka-go"
 	tckafka "github.com/testcontainers/testcontainers-go/modules/kafka"
 	tcrabbitmq "github.com/testcontainers/testcontainers-go/modules/rabbitmq"
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/broker"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/kafka"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv1"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/rabbitmq"
 )
 
 // Publishing and subscribing are tested together and against both brokers,
@@ -234,4 +238,149 @@ func TestAFailedHandlerLeavesTheMessageWithTheBroker(t *testing.T) {
 			t.Fatalf("the message was delivered %d times, want it retried after failing", seen)
 		}
 	}
+}
+
+func TestARejectedMessageIsSetAsideWithItsReason(t *testing.T) {
+	for _, provider := range []broker.Provider{broker.ProviderRabbitMQ, broker.ProviderKafka} {
+		t.Run(string(provider), func(t *testing.T) {
+			config := brokerConfig(t, provider)
+
+			const consumer = "reject-test"
+			contract := (orderingv1.OrderCreated{}).Contract()
+
+			if provider == broker.ProviderKafka {
+				createTopic(t, config.Kafka.Brokers, kafka.RejectedTopic(config.Kafka.Topic(contract.EventType)))
+			}
+
+			registry := messaging.NewRegistry()
+			orderingv1.Register(registry)
+			log := slog.New(slog.DiscardHandler)
+
+			subscriber, err := broker.NewSubscriber(config, consumer, []messaging.Contract{contract}, log)
+			if err != nil {
+				t.Fatalf("building subscriber: %v", err)
+			}
+			t.Cleanup(func() { _ = subscriber.Close() })
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			go func() {
+				_ = subscriber.Subscribe(ctx, func(context.Context, messaging.Envelope) error {
+					return messaging.Reject(errors.New("the total does not match the lines"))
+				})
+			}()
+
+			publisher, err := broker.New(config, registry)
+			if err != nil {
+				t.Fatalf("building publisher: %v", err)
+			}
+			t.Cleanup(func() { _ = publisher.Close() })
+
+			sent := sampleEnvelope(t)
+
+			var id, reason string
+			switch provider {
+			case broker.ProviderRabbitMQ:
+				id, reason = firstFromErrorQueue(t, ctx, config.RabbitMQ.URL, rabbitmq.ErrorQueue(consumer), publisher, sent)
+			default:
+				id, reason = firstFromRejectedTopic(t, ctx, config.Kafka.Brokers,
+					kafka.RejectedTopic(config.Kafka.Topic(contract.EventType)), publisher, sent)
+			}
+
+			// The copy has to be recognisable as the message it replaces, and
+			// say why it was given up on.
+			if id != sent.ID.String() {
+				t.Errorf("set-aside message id = %q, want %s", id, sent.ID)
+			}
+			if !strings.Contains(reason, "the total does not match the lines") {
+				t.Errorf("rejection reason = %q, want the handler's error", reason)
+			}
+		})
+	}
+}
+
+// firstFromErrorQueue publishes until a copy shows up in the error queue.
+func firstFromErrorQueue(
+	t *testing.T, ctx context.Context, url, queue string,
+	publisher messaging.Publisher, sent messaging.Envelope,
+) (string, string) {
+	t.Helper()
+
+	connection, err := amqp.Dial(url)
+	if err != nil {
+		t.Fatalf("connecting to rabbitmq: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+
+	channel, err := connection.Channel()
+	if err != nil {
+		t.Fatalf("opening channel: %v", err)
+	}
+
+	deadline := time.After(60 * time.Second)
+	for {
+		if err := publisher.Publish(ctx, sent); err != nil {
+			t.Fatalf("publishing: %v", err)
+		}
+
+		select {
+		case <-deadline:
+			t.Fatal("no rejected message reached the error queue")
+		case <-time.After(2 * time.Second):
+		}
+
+		// The queue is declared by the subscriber, so it may not exist yet.
+		delivery, ok, err := channel.Get(queue, true)
+		if err != nil {
+			if channel, err = connection.Channel(); err != nil {
+				t.Fatalf("reopening channel: %v", err)
+			}
+			continue
+		}
+		if ok {
+			reason, _ := delivery.Headers["rejection-reason"].(string)
+			return delivery.MessageId, reason
+		}
+	}
+}
+
+// firstFromRejectedTopic publishes once and reads the copy back.
+func firstFromRejectedTopic(
+	t *testing.T, ctx context.Context, addresses []string, topic string,
+	publisher messaging.Publisher, sent messaging.Envelope,
+) (string, string) {
+	t.Helper()
+
+	reader := kafkago.NewReader(kafkago.ReaderConfig{
+		Brokers:     addresses,
+		Topic:       topic,
+		StartOffset: kafkago.FirstOffset,
+	})
+	t.Cleanup(func() { _ = reader.Close() })
+
+	// The group starts from the first offset, so one publish is enough.
+	if err := publisher.Publish(ctx, sent); err != nil {
+		t.Fatalf("publishing: %v", err)
+	}
+
+	readCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	message, err := reader.ReadMessage(readCtx)
+	if err != nil {
+		t.Fatalf("reading %s: %v", topic, err)
+	}
+
+	var id, reason string
+	for _, header := range message.Headers {
+		switch header.Key {
+		case kafka.MessageIDHeader:
+			id = string(header.Value)
+		case kafka.RejectionReasonHeader:
+			reason = string(header.Value)
+		}
+	}
+
+	return id, reason
 }
