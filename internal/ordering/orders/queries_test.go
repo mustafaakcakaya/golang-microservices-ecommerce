@@ -60,7 +60,7 @@ func TestAnEmptyPageSerializesAsAnEmptyList(t *testing.T) {
 	}
 }
 
-func TestAViewNeverCarriesCardDetails(t *testing.T) {
+func TestAViewShowsTheCardOnlyByItsLastFourDigits(t *testing.T) {
 	t.Parallel()
 
 	repo := newFakeRepository(storedOrder(t, "ORD_1", customerID(t)))
@@ -78,15 +78,12 @@ func TestAViewNeverCarriesCardDetails(t *testing.T) {
 	rendered := string(body)
 
 	// The whole reason the read model is a separate type: reading an order back
-	// must not be a way to read a card number back out of the database.
-	if strings.Contains(rendered, cardNumber) {
-		t.Errorf("the response leaked the card number: %s", rendered)
+	// must not hand out the token a charge would be made with.
+	if strings.Contains(rendered, paymentToken) || strings.Contains(rendered, "paymentToken") {
+		t.Errorf("the response leaked the payment token: %s", rendered)
 	}
-	if strings.Contains(rendered, `"cvv"`) || strings.Contains(rendered, cvv) {
-		t.Errorf("the response leaked the CVV: %s", rendered)
-	}
-	if !strings.Contains(rendered, "************4444") {
-		t.Errorf("the masked card number is missing: %s", rendered)
+	if !strings.Contains(rendered, `"cardLast4":"4444"`) {
+		t.Errorf("the last four digits are missing: %s", rendered)
 	}
 }
 
@@ -119,7 +116,7 @@ func TestAnUnpaidOrderReportsNoPayment(t *testing.T) {
 	}
 
 	if result.Orders.Data[0].Payment != nil {
-		t.Errorf("payment = %+v, want it absent until the order is paid for",
+		t.Errorf("payment = %+v, want it absent for an order stored without one",
 			result.Orders.Data[0].Payment)
 	}
 

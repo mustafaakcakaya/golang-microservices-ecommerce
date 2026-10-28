@@ -184,7 +184,7 @@ func placeOrder(t *testing.T, name string, alsoUpdate bool) *domain.Order {
 	if err != nil {
 		t.Fatalf("address: %v", err)
 	}
-	payment, err := domain.NewPayment("Mustafa", "5555555555554444", "12/28", "355", 1)
+	payment, err := domain.NewPayment("pt_test", "4444", 1)
 	if err != nil {
 		t.Fatalf("payment: %v", err)
 	}

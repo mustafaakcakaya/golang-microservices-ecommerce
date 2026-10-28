@@ -23,7 +23,7 @@ const selectOrders = `
 		ShippingAddress_AddressLine, ShippingAddress_Country, ShippingAddress_State, ShippingAddress_ZipCode,
 		BillingAddress_FirstName, BillingAddress_LastName, BillingAddress_EmailAddress,
 		BillingAddress_AddressLine, BillingAddress_Country, BillingAddress_State, BillingAddress_ZipCode,
-		Payment_CardName, Payment_CardNumber, Payment_Expiration, Payment_CVV, Payment_PaymentMethod
+		Payment_PaymentToken, Payment_CardLast4, Payment_PaymentMethod
 	FROM Orders`
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
@@ -48,17 +48,16 @@ func scanOrder(row scanner) (*domain.Order, error) {
 		billEmail             *string
 		billLine, billCountry string
 		billState, billZip    string
-		// All nullable: an order placed through checkout has no payment yet.
-		cardName, cardNumber *string
-		expiration, cvv      *string
-		paymentMethod        *int
+		// All nullable: an order can be stored without a payment.
+		paymentToken, cardLast4 *string
+		paymentMethod           *int
 	)
 
 	if err := row.Scan(
 		&id, &customerID, &orderName, &status,
 		&shipFirst, &shipLast, &shipEmail, &shipLine, &shipCountry, &shipState, &shipZip,
 		&billFirst, &billLast, &billEmail, &billLine, &billCountry, &billState, &billZip,
-		&cardName, &cardNumber, &expiration, &cvv, &paymentMethod,
+		&paymentToken, &cardLast4, &paymentMethod,
 	); err != nil {
 		return nil, err
 	}
@@ -87,7 +86,7 @@ func scanOrder(row scanner) (*domain.Order, error) {
 	if err != nil {
 		return nil, fmt.Errorf("billing address: %w", err)
 	}
-	payment, err := scanPayment(cardName, cardNumber, expiration, cvv, paymentMethod)
+	payment, err := scanPayment(paymentToken, cardLast4, paymentMethod)
 	if err != nil {
 		return nil, err
 	}
@@ -144,11 +143,11 @@ func withItems(order *domain.Order, items []domain.OrderItem) *domain.Order {
 
 // scanPayment rebuilds the payment, or reports that there is none.
 //
-// A missing card number is the marker: the domain's zero Payment means the
-// order has not been paid for, which is different from a payment whose fields
-// happen to be blank.
-func scanPayment(cardName, cardNumber, expiration, cvv *string, paymentMethod *int) (domain.Payment, error) {
-	if cardNumber == nil {
+// A missing token is the marker: the domain's zero Payment means the order has
+// no payment recorded, which is different from a payment whose fields happen to
+// be blank.
+func scanPayment(paymentToken, cardLast4 *string, paymentMethod *int) (domain.Payment, error) {
+	if paymentToken == nil {
 		return domain.Payment{}, nil
 	}
 
@@ -157,7 +156,7 @@ func scanPayment(cardName, cardNumber, expiration, cvv *string, paymentMethod *i
 		method = *paymentMethod
 	}
 
-	payment, err := domain.NewPayment(deref(cardName), *cardNumber, deref(expiration), deref(cvv), method)
+	payment, err := domain.NewPayment(*paymentToken, deref(cardLast4), method)
 	if err != nil {
 		return domain.Payment{}, fmt.Errorf("payment: %w", err)
 	}

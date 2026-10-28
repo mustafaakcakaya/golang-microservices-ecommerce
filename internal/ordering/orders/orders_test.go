@@ -18,14 +18,10 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/pagination"
 )
 
-const (
-	cardNumber = "5555555555554444"
-	// Letters outside the hex range, so the value cannot occur by chance in a
-	// UUID, a timestamp or a duration. Three digits such as "355" do, and a
-	// leak check searching for them fails for the wrong reason a few percent
-	// of the time. The domain accepts any three characters.
-	cvv = "zqx"
-)
+// paymentToken uses letters outside the hex range, so the value cannot occur by
+// chance in a UUID, a timestamp or a duration, and a leak check searching for
+// it cannot fail for the wrong reason.
+const paymentToken = "pt_zqxzqxzqxzqx"
 
 // fakeRepository is an in-memory stand-in so handler behaviour can be tested
 // without Docker; the SQL Server implementation has its own integration tests.
@@ -122,10 +118,8 @@ func sampleAddress() orders.AddressInput {
 
 func samplePayment() orders.PaymentInput {
 	return orders.PaymentInput{
-		CardName:      "Mustafa Akcakaya",
-		CardNumber:    cardNumber,
-		Expiration:    "12/28",
-		CVV:           cvv,
+		PaymentToken:  paymentToken,
+		CardLast4:     "4444",
 		PaymentMethod: 1,
 	}
 }
@@ -160,7 +154,7 @@ func storedOrder(t *testing.T, name string, customerID domain.CustomerID) *domai
 	if err != nil {
 		t.Fatalf("address: %v", err)
 	}
-	payment, err := domain.NewPayment("Mustafa Akcakaya", cardNumber, "12/28", cvv, 1)
+	payment, err := domain.NewPayment(paymentToken, "4444", 1)
 	if err != nil {
 		t.Fatalf("payment: %v", err)
 	}
@@ -181,7 +175,8 @@ func storedOrder(t *testing.T, name string, customerID domain.CustomerID) *domai
 		domain.OrderStatusPending, []domain.OrderItem{item})
 }
 
-// unpaidOrder is an order as checkout produces one: a draft with no payment.
+// unpaidOrder is an order stored without a payment, as checkouts produced
+// them before they carried a payment token.
 func unpaidOrder(t *testing.T, name string, customerID domain.CustomerID) *domain.Order {
 	t.Helper()
 
@@ -310,7 +305,7 @@ func TestCreateRejectsAnOrderWithoutLines(t *testing.T) {
 	}
 }
 
-func TestACommandNeverRendersCardDetails(t *testing.T) {
+func TestACommandNeverRendersThePaymentToken(t *testing.T) {
 	t.Parallel()
 
 	command := sampleCommand()
@@ -320,11 +315,8 @@ func TestACommandNeverRendersCardDetails(t *testing.T) {
 		fmt.Sprintf("%+v", command),
 		fmt.Sprintf("%v", command.Payment),
 	} {
-		if strings.Contains(rendered, cardNumber) {
-			t.Errorf("a rendered command leaked the card number: %s", rendered)
-		}
-		if strings.Contains(rendered, cvv) {
-			t.Errorf("a rendered command leaked the CVV: %s", rendered)
+		if strings.Contains(rendered, paymentToken) {
+			t.Errorf("a rendered command leaked the payment token: %s", rendered)
 		}
 	}
 

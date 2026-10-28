@@ -10,14 +10,16 @@ import (
 )
 
 const (
-	testCardNumber = "5555555555554444"
-	testCVV        = "123"
+	// Letters no UUID or digit string can contain, so a test that looks for
+	// the token in rendered text cannot match it by chance.
+	testToken = "pt_zqxzqxzqxzqx"
+	testLast4 = "4444"
 )
 
 func newPayment(t *testing.T) domain.Payment {
 	t.Helper()
 
-	payment, err := domain.NewPayment("Mustafa Akcakaya", testCardNumber, "12/28", testCVV, 1)
+	payment, err := domain.NewPayment(testToken, testLast4, 1)
 	if err != nil {
 		t.Fatalf("building payment: %v", err)
 	}
@@ -28,61 +30,55 @@ func TestPaymentRequiresItsFields(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]struct {
-		cardName, cardNumber, cvv string
+		token, last4 string
 	}{
-		"missing card name":   {"", testCardNumber, testCVV},
-		"blank card name":     {"   ", testCardNumber, testCVV},
-		"missing card number": {"Mustafa", "", testCVV},
-		"missing cvv":         {"Mustafa", testCardNumber, ""},
-		"cvv too long":        {"Mustafa", testCardNumber, "12345"},
+		"missing token":      {"", testLast4},
+		"blank token":        {"   ", testLast4},
+		"missing last four":  {testToken, ""},
+		"three digits":       {testToken, "444"},
+		"a whole card":       {testToken, "5555555555554444"},
+		"letters for digits": {testToken, "44a4"},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if _, err := domain.NewPayment(tc.cardName, tc.cardNumber, "12/28", tc.cvv, 1); err == nil {
+			if _, err := domain.NewPayment(tc.token, tc.last4, 1); err == nil {
 				t.Error("expected a rule violation")
 			}
 		})
 	}
 }
 
-func TestFormattingAPaymentDoesNotRevealTheCard(t *testing.T) {
+func TestFormattingAPaymentDoesNotRevealTheToken(t *testing.T) {
 	t.Parallel()
 
 	payment := newPayment(t)
 
-	// Each of these is a plausible way a card number reaches a log line. %+v is
-	// the one worth pinning: it expands structs field by field unless the type
+	// Each of these is a plausible way a token reaches a log line. %+v is the
+	// one worth pinning: it expands structs field by field unless the type
 	// says otherwise.
-	rendered := []string{
+	for _, text := range []string{
 		payment.String(),
 		fmt.Sprintf("%v", payment),
 		fmt.Sprintf("%+v", payment),
-	}
-
-	for _, text := range rendered {
-		if strings.Contains(text, testCardNumber) {
-			t.Errorf("rendered payment leaks the card number: %s", text)
-		}
-		if strings.Contains(text, testCVV) {
-			t.Errorf("rendered payment leaks the CVV: %s", text)
+	} {
+		if strings.Contains(text, testToken) {
+			t.Errorf("rendered payment leaks the token: %s", text)
 		}
 	}
 }
 
-func TestFormattingAnOrderDoesNotRevealTheCard(t *testing.T) {
+func TestFormattingAnOrderDoesNotRevealTheToken(t *testing.T) {
 	t.Parallel()
 
 	order := newOrder(t)
 
 	// %+v on an aggregate is the accident this guards against: it walks into
 	// every field, including the payment.
-	text := fmt.Sprintf("%+v", order)
-
-	if strings.Contains(text, testCardNumber) || strings.Contains(text, testCVV) {
-		t.Errorf("formatted order leaks payment details: %s", text)
+	if text := fmt.Sprintf("%+v", order); strings.Contains(text, testToken) {
+		t.Errorf("formatted order leaks the payment token: %s", text)
 	}
 }
 
@@ -98,20 +94,8 @@ func TestMarshallingAPaymentFailsRatherThanLeaking(t *testing.T) {
 	if err == nil {
 		t.Fatalf("marshalling should fail, got %s", encoded)
 	}
-	if strings.Contains(string(encoded), testCardNumber) {
-		t.Errorf("encoded payment leaks the card number: %s", encoded)
-	}
-}
-
-func TestMaskedCardNumberKeepsOnlyTheLastFour(t *testing.T) {
-	t.Parallel()
-
-	payment := newPayment(t)
-
-	masked := payment.MaskedCardNumber()
-
-	if masked != "************4444" {
-		t.Errorf("masked = %q, want the last four digits only", masked)
+	if strings.Contains(string(encoded), testToken) {
+		t.Errorf("encoded payment leaks the token: %s", encoded)
 	}
 }
 
@@ -121,7 +105,7 @@ func TestAccessorsStillExposeTheValuesForPersistence(t *testing.T) {
 	payment := newPayment(t)
 
 	// Redaction must not make the data unreachable: storage still needs it.
-	if payment.CardNumber() != testCardNumber || payment.CVV() != testCVV {
+	if payment.PaymentToken() != testToken || payment.CardLast4() != testLast4 || payment.PaymentMethod() != 1 {
 		t.Error("accessors should return the stored values")
 	}
 }

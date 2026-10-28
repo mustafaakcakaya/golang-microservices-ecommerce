@@ -242,12 +242,11 @@ func upsertOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
 	shipping := order.ShippingAddress()
 	billing := order.BillingAddress()
 
-	// An unpaid order stores NULLs rather than empty strings, so "not paid
-	// for yet" cannot be mistaken for a card number nobody filled in.
-	var cardNumber, expiration, cvv, method any
+	// An order without a payment stores NULLs rather than empty strings, so
+	// "no payment" cannot be mistaken for a token nobody filled in.
+	var token, last4, method any
 	if !payment.IsZero() {
-		cardNumber, expiration = payment.CardNumber(), payment.Expiration()
-		cvv, method = payment.CVV(), payment.PaymentMethod()
+		token, last4, method = payment.PaymentToken(), payment.CardLast4(), payment.PaymentMethod()
 	}
 
 	const query = `
@@ -261,8 +260,7 @@ func upsertOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
 			BillingAddress_FirstName = @p12, BillingAddress_LastName = @p13,
 			BillingAddress_EmailAddress = @p14, BillingAddress_AddressLine = @p15,
 			BillingAddress_Country = @p16, BillingAddress_State = @p17, BillingAddress_ZipCode = @p18,
-			Payment_CardName = @p19, Payment_CardNumber = @p20, Payment_Expiration = @p21,
-			Payment_CVV = @p22, Payment_PaymentMethod = @p23,
+			Payment_PaymentToken = @p19, Payment_CardLast4 = @p20, Payment_PaymentMethod = @p21,
 			LastModifiedAt = SYSUTCDATETIME()
 		WHEN NOT MATCHED THEN INSERT (
 			Id, CustomerId, OrderName, Status,
@@ -270,13 +268,13 @@ func upsertOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
 			ShippingAddress_AddressLine, ShippingAddress_Country, ShippingAddress_State, ShippingAddress_ZipCode,
 			BillingAddress_FirstName, BillingAddress_LastName, BillingAddress_EmailAddress,
 			BillingAddress_AddressLine, BillingAddress_Country, BillingAddress_State, BillingAddress_ZipCode,
-			Payment_CardName, Payment_CardNumber, Payment_Expiration, Payment_CVV, Payment_PaymentMethod,
+			Payment_PaymentToken, Payment_CardLast4, Payment_PaymentMethod,
 			CreatedAt
 		) VALUES (
 			@p1, @p2, @p3, @p4,
 			@p5, @p6, @p7, @p8, @p9, @p10, @p11,
 			@p12, @p13, @p14, @p15, @p16, @p17, @p18,
-			@p19, @p20, @p21, @p22, @p23,
+			@p19, @p20, @p21,
 			SYSUTCDATETIME()
 		);`
 
@@ -286,7 +284,7 @@ func upsertOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
 		shipping.Country, shipping.State, shipping.ZipCode,
 		billing.FirstName, billing.LastName, nullable(billing.EmailAddress), billing.AddressLine,
 		billing.Country, billing.State, billing.ZipCode,
-		nullable(payment.CardName()), cardNumber, expiration, cvv, method,
+		token, last4, method,
 	)
 	if err != nil {
 		if isForeignKeyViolation(err) {

@@ -24,14 +24,10 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/pagination"
 )
 
-const (
-	cardNumber = "5555555555554444"
-	// Letters outside the hex range, so the value cannot occur by chance in a
-	// UUID, a timestamp or a duration. Three digits such as "355" do, and a
-	// leak check searching for them fails for the wrong reason a few percent
-	// of the time. The domain accepts any three characters.
-	cvv = "zqx"
-)
+// paymentToken uses letters outside the hex range, so the value cannot occur by
+// chance in a UUID, a timestamp or a duration, and a leak check searching for
+// it cannot fail for the wrong reason.
+const paymentToken = "pt_zqxzqxzqxzqx"
 
 // One SQL Server is shared by the whole package. It takes tens of seconds to
 // become ready, so a container per test would dominate the run; tests therefore
@@ -40,7 +36,13 @@ const (
 // Setup lives in TestMain rather than a helper's t.Cleanup: cleanup registered
 // on the first test's t runs when that test ends, which would tear the
 // container down while the rest of the package still needs it.
-var sharedDB *sql.DB
+var (
+	sharedDB *sql.DB
+
+	// sharedDSN reaches the same server, for tests that need a database of
+	// their own on it.
+	sharedDSN string
+)
 
 // databaseDSN points a connection string at another database on the same
 // server.
@@ -146,7 +148,7 @@ func run(ctx context.Context, container *tcmssql.MSSQLServerContainer, m *testin
 		return 1
 	}
 
-	sharedDB = db
+	sharedDB, sharedDSN = db, dsn
 
 	return m.Run()
 }
@@ -240,7 +242,7 @@ func newOrder(t *testing.T, customerID domain.CustomerID, name string) *domain.O
 	if err != nil {
 		t.Fatalf("address: %v", err)
 	}
-	payment, err := domain.NewPayment("Mustafa Akcakaya", cardNumber, "12/28", cvv, 1)
+	payment, err := domain.NewPayment(paymentToken, "4444", 1)
 	if err != nil {
 		t.Fatalf("payment: %v", err)
 	}
@@ -276,8 +278,9 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 		t.Errorf("shipping address = %+v, want the stored one", got.ShippingAddress())
 	}
 	// Payment survives storage; it is redacted when rendered, not when stored.
-	if got.Payment().CardNumber() != cardNumber || got.Payment().CVV() != cvv {
-		t.Error("payment details did not round trip")
+	if got.Payment().PaymentToken() != paymentToken || got.Payment().CardLast4() != "4444" ||
+		got.Payment().PaymentMethod() != 1 {
+		t.Errorf("payment = %v, did not round trip", got.Payment())
 	}
 
 	items := got.Items()
@@ -334,15 +337,15 @@ func TestAnOrderWithoutPaymentRoundTrips(t *testing.T) {
 		t.Errorf("status = %v, want Draft", got.Status())
 	}
 
-	// Stored as NULL rather than as empty strings, so a reader cannot mistake
-	// an unpaid order for one with blank card details.
-	var storedCard *string
+	// Stored as NULL rather than as an empty string, so a reader cannot
+	// mistake an order without a payment for one with a blank token.
+	var storedToken *string
 	if err := db.QueryRowContext(t.Context(),
-		`SELECT Payment_CardNumber FROM Orders WHERE Id = @p1`, order.ID().UUID()).Scan(&storedCard); err != nil {
+		`SELECT Payment_PaymentToken FROM Orders WHERE Id = @p1`, order.ID().UUID()).Scan(&storedToken); err != nil {
 		t.Fatalf("reading the stored payment: %v", err)
 	}
-	if storedCard != nil {
-		t.Errorf("stored card number = %q, want NULL", *storedCard)
+	if storedToken != nil {
+		t.Errorf("stored token = %q, want NULL", *storedToken)
 	}
 }
 
@@ -624,7 +627,7 @@ func TestSavingAnOrderCommitsItsOutboxMessageWithIt(t *testing.T) {
 	}
 	// The payload is a contract, not the aggregate: nothing a consumer has no
 	// business knowing may reach the broker through it.
-	for _, secret := range []string{cardNumber, cvv, "Test Address"} {
+	for _, secret := range []string{paymentToken, "Test Address"} {
 		if strings.Contains(messages[0].payload, secret) {
 			t.Errorf("the outbox payload leaked %q: %s", secret, messages[0].payload)
 		}

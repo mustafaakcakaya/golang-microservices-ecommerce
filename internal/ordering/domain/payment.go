@@ -5,90 +5,81 @@ import (
 	"strings"
 )
 
-// maxCVVLength bounds the security code.
-const maxCVVLength = 3
+// cardLast4Length is how many digits of the card an order keeps.
+const cardLast4Length = 4
 
-// Payment holds the card details an order was paid with.
+// Payment is how an order is paid for, by reference.
 //
-// The fields are unexported and reachable only through accessors, and both the
-// fmt and encoding/json representations are redacted. Card numbers and security
-// codes must never reach a log line, an error message or an outbound message;
-// making the type refuse to render them means that cannot happen by accident -
-// a %v of an Order, or marshalling one into a response, stays safe.
+// The card itself lives in the Payment service. An order keeps the token that
+// service issued for it, the last four digits so a customer can tell which card
+// they used, and the payment method. Nothing here can be charged on its own.
+//
+// The token is still kept out of logs and responses: it is the handle a future
+// charge would be made with, so it is treated like a credential rather than a
+// label. The fmt and encoding/json representations both leave it out.
 type Payment struct {
-	cardName      string
-	cardNumber    string
-	expiration    string
-	cvv           string
+	paymentToken  string
+	cardLast4     string
 	paymentMethod int
 }
 
 // NewPayment validates and builds a payment.
-func NewPayment(cardName, cardNumber, expiration, cvv string, paymentMethod int) (Payment, error) {
-	if strings.TrimSpace(cardName) == "" {
-		return Payment{}, invalidf("CardName is required")
+func NewPayment(paymentToken, cardLast4 string, paymentMethod int) (Payment, error) {
+	if strings.TrimSpace(paymentToken) == "" {
+		return Payment{}, invalidf("PaymentToken is required")
 	}
-	if strings.TrimSpace(cardNumber) == "" {
-		return Payment{}, invalidf("CardNumber is required")
-	}
-	if strings.TrimSpace(cvv) == "" {
-		return Payment{}, invalidf("CVV is required")
-	}
-	if len(cvv) > maxCVVLength {
-		return Payment{}, invalidf("CVV must be at most %d characters", maxCVVLength)
+	if !isDigits(cardLast4, cardLast4Length) {
+		return Payment{}, invalidf("CardLast4 must be the last %d digits of the card", cardLast4Length)
 	}
 
 	return Payment{
-		cardName:      cardName,
-		cardNumber:    cardNumber,
-		expiration:    expiration,
-		cvv:           cvv,
+		paymentToken:  paymentToken,
+		cardLast4:     cardLast4,
 		paymentMethod: paymentMethod,
 	}, nil
 }
 
-// IsZero reports whether the order has no payment recorded yet.
-//
-// An order can be placed before it is paid for - a checkout that carries no
-// card details produces exactly that - so the absence of a payment is a state
-// the domain has to be able to express rather than a broken value.
-func (p Payment) IsZero() bool {
-	return p.cardNumber == ""
+// isDigits reports whether value is exactly length ASCII digits.
+func isDigits(value string, length int) bool {
+	if len(value) != length {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
-// CardName returns the name on the card.
-func (p Payment) CardName() string { return p.cardName }
+// IsZero reports whether the order has no payment recorded.
+//
+// Orders placed before checkouts carried a payment token were stored without
+// one, so the absence of a payment is a state the domain has to be able to
+// express rather than a broken value.
+func (p Payment) IsZero() bool {
+	return p.paymentToken == ""
+}
 
-// CardNumber returns the full card number. Only persistence should call it.
-func (p Payment) CardNumber() string { return p.cardNumber }
+// PaymentToken returns the token. Only persistence should call it.
+func (p Payment) PaymentToken() string { return p.paymentToken }
 
-// Expiration returns the expiry as stored.
-func (p Payment) Expiration() string { return p.expiration }
-
-// CVV returns the security code. Only persistence should call it.
-func (p Payment) CVV() string { return p.cvv }
+// CardLast4 returns the last four digits of the card.
+func (p Payment) CardLast4() string { return p.cardLast4 }
 
 // PaymentMethod returns the method code.
 func (p Payment) PaymentMethod() int { return p.paymentMethod }
 
-// MaskedCardNumber shows only the last four digits, for the rare case where a
-// human needs to recognise which card was used.
-func (p Payment) MaskedCardNumber() string {
-	const visible = 4
-
-	if len(p.cardNumber) <= visible {
-		return strings.Repeat("*", len(p.cardNumber))
+// String leaves the token out so formatting a Payment cannot leak it.
+func (p Payment) String() string {
+	if p.IsZero() {
+		return "Payment{none}"
 	}
 
-	return strings.Repeat("*", len(p.cardNumber)-visible) + p.cardNumber[len(p.cardNumber)-visible:]
+	return "Payment{cardLast4: " + p.cardLast4 + ", token: [redacted]}"
 }
 
-// String redacts the card details so formatting a Payment cannot leak them.
-func (p Payment) String() string {
-	return "Payment{cardNumber: " + p.MaskedCardNumber() + ", cvv: [redacted]}"
-}
-
-// MarshalJSON refuses to serialize card details.
+// MarshalJSON refuses to serialize the payment.
 //
 // Returning an error rather than a redacted object is deliberate: a Payment
 // reaching a JSON encoder means something is about to send it somewhere it does

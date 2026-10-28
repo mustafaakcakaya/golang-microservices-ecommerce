@@ -100,7 +100,9 @@ func sampleOrders(customers []*domain.Customer, products []*domain.Product) ([]*
 	if err != nil {
 		return nil, err
 	}
-	payment, err := domain.NewPayment("mehmet", "5555555555554444", "12/28", "355", 1)
+	// The sample order predates the Payment service, so its token refers to
+	// no card.
+	payment, err := domain.NewPayment("seed-token-ord-1", "4444", 1)
 	if err != nil {
 		return nil, err
 	}

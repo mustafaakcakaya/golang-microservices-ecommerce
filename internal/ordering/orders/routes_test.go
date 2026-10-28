@@ -67,10 +67,8 @@ func sampleOrderBody() map[string]any {
 		"shippingAddress": address,
 		"billingAddress":  address,
 		"payment": map[string]any{
-			"cardName":      "Mustafa Akcakaya",
-			"cardNumber":    cardNumber,
-			"expiration":    "12/28",
-			"cvv":           cvv,
+			"paymentToken":  paymentToken,
+			"cardLast4":     "4444",
 			"paymentMethod": 1,
 		},
 		"orderItems": []map[string]any{
@@ -135,7 +133,7 @@ func TestPostOrdersReportsABrokenOrderNameAsABadRequest(t *testing.T) {
 	}
 }
 
-func TestAResponseNeverCarriesCardDetails(t *testing.T) {
+func TestAResponseNeverCarriesThePaymentToken(t *testing.T) {
 	t.Parallel()
 
 	router := newRouter(newFakeRepository(storedOrder(t, "ORD_1", customerID(t))))
@@ -145,8 +143,8 @@ func TestAResponseNeverCarriesCardDetails(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", response.Code)
 	}
-	if body := response.Body.String(); strings.Contains(body, cardNumber) || strings.Contains(body, cvv) {
-		t.Errorf("the response leaked payment details: %s", body)
+	if body := response.Body.String(); strings.Contains(body, paymentToken) {
+		t.Errorf("the response leaked the payment token: %s", body)
 	}
 }
 

@@ -1,6 +1,7 @@
 package validation_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -107,4 +108,31 @@ func withPrice(c command, price int64) command {
 func withTags(c command) command {
 	c.Tags = []string{}
 	return c
+}
+
+func TestFixedLengthDigitsReadAsProseWithoutTheValue(t *testing.T) {
+	t.Parallel()
+
+	type card struct {
+		Last4 string `validate:"len=4,numeric"`
+	}
+
+	for input, want := range map[string]string{
+		"44444": "Last4 must be exactly 4 characters",
+		"44a4":  "Last4 must contain only digits",
+	} {
+		appErr, ok := apperr.As(validation.Struct(card{Last4: input}))
+		if !ok {
+			t.Fatalf("%q: want a validation error", input)
+		}
+		got := appErr.Fields["Last4"]
+		if got != want {
+			t.Errorf("%q: message = %q, want %q", input, got, want)
+		}
+		// Messages are shown to callers and logged, so the value they
+		// complain about must not appear in them.
+		if strings.Contains(got, input) {
+			t.Errorf("%q: the message repeats the submitted value", input)
+		}
+	}
 }

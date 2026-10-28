@@ -98,6 +98,13 @@ func message(err validator.FieldError) string {
 			return fmt.Sprintf("%s must have at most %s item(s)", name, err.Param())
 		}
 		return fmt.Sprintf("%s must be at most %s characters", name, err.Param())
+	case "len":
+		if isCollection(err) {
+			return fmt.Sprintf("%s must have exactly %s item(s)", name, err.Param())
+		}
+		return fmt.Sprintf("%s must be exactly %s characters", name, err.Param())
+	case "numeric":
+		return fmt.Sprintf("%s must contain only digits", name)
 	case "gt":
 		return fmt.Sprintf("%s must be greater than %s", name, err.Param())
 	case "gte":

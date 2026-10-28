@@ -2,7 +2,6 @@ package orders
 
 import (
 	"errors"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -34,43 +33,33 @@ func (a AddressInput) toDomain() (domain.Address, error) {
 	)
 }
 
-// PaymentInput carries the card details of an incoming order.
+// PaymentInput says how an incoming order is paid for.
 //
-// It is an inbound-only shape: it is decoded from a request body and turned
-// into a domain.Payment, and it must never travel back out. Both the fmt and
-// the encoding/json representations refuse to render the card details, which is
-// what keeps a %v of a command out of the logs and a stray marshal out of a
-// response body - the same protection domain.Payment gives the aggregate.
+// It carries a reference, not a card: the card goes to the Payment service,
+// which keeps it and issues the token. Ordering never sees a card number or a
+// security code, so it has none to store, return or leak.
 type PaymentInput struct {
-	CardName      string `json:"cardName" validate:"required"`
-	CardNumber    string `json:"cardNumber" validate:"required,min=12,max=19"`
-	Expiration    string `json:"expiration" validate:"required"`
-	CVV           string `json:"cvv" validate:"required,max=3"`
+	PaymentToken  string `json:"paymentToken" validate:"required"`
+	CardLast4     string `json:"cardLast4" validate:"required,len=4,numeric"`
 	PaymentMethod int    `json:"paymentMethod"`
 }
 
 // toDomain builds the value object.
 func (p PaymentInput) toDomain() (domain.Payment, error) {
-	return domain.NewPayment(p.CardName, p.CardNumber, p.Expiration, p.CVV, p.PaymentMethod)
+	return domain.NewPayment(p.PaymentToken, p.CardLast4, p.PaymentMethod)
 }
 
-// String redacts the card details so formatting a command cannot leak them.
+// String leaves the token out, so formatting a command cannot leak it.
 func (p PaymentInput) String() string {
-	const visible = 4
-
-	masked := strings.Repeat("*", len(p.CardNumber))
-	if len(p.CardNumber) > visible {
-		masked = strings.Repeat("*", len(p.CardNumber)-visible) + p.CardNumber[len(p.CardNumber)-visible:]
-	}
-
-	return "PaymentInput{cardNumber: " + masked + ", cvv: [redacted]}"
+	return "PaymentInput{cardLast4: " + p.CardLast4 + ", token: [redacted]}"
 }
 
-// MarshalJSON refuses to serialize card details.
+// MarshalJSON refuses to serialize the payment.
 //
-// Failing loudly beats emitting a redacted object: a command reaching a JSON
-// encoder means something is about to send it somewhere it does not belong, and
-// a body that looks complete but silently dropped the fields would hide that.
+// It is an inbound-only shape. Failing loudly beats emitting a redacted
+// object: a command reaching a JSON encoder means something is about to send
+// it somewhere it does not belong, and a body that looks complete but silently
+// dropped the token would hide that.
 func (p PaymentInput) MarshalJSON() ([]byte, error) {
 	return nil, errPaymentSerialized
 }

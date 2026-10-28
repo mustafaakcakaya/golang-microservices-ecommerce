@@ -121,7 +121,7 @@ func newOrder(
 // It is not decoration. Formatting a struct walks into every field, and fmt
 // only asks an exported field to render itself - an unexported one is printed
 // raw, Stringer or not. Making the aggregate render itself is what stops a
-// %+v of an order from printing the card number the payment hides.
+// %+v of an order from printing the payment token the payment hides.
 //
 // The receiver is a value so that both an Order and an *Order format safely;
 // with a pointer receiver, printing a copy would fall back to walking fields.
