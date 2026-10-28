@@ -1,13 +1,170 @@
 package mssql_test
 
 import (
+	"database/sql"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/domain"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/mssql"
 )
+
+func newCustomer(t *testing.T) *domain.Customer {
+	t.Helper()
+
+	id, err := domain.NewCustomerID(uuid.New())
+	if err != nil {
+		t.Fatalf("customer id: %v", err)
+	}
+	customer, err := domain.NewCustomer(id, "Mustafa Akcakaya", "mustafa@example.com")
+	if err != nil {
+		t.Fatalf("customer: %v", err)
+	}
+
+	return customer
+}
+
+func newProduct(t *testing.T, name string, price int64) *domain.Product {
+	t.Helper()
+
+	id, err := domain.NewProductID(uuid.New())
+	if err != nil {
+		t.Fatalf("product id: %v", err)
+	}
+	product, err := domain.NewProduct(id, name, decimal.NewFromInt(price))
+	if err != nil {
+		t.Fatalf("product: %v", err)
+	}
+
+	return product
+}
+
+// storedProduct reads a product row back, reporting whether there is one.
+func storedProduct(t *testing.T, id domain.ProductID) (string, decimal.Decimal, bool) {
+	t.Helper()
+
+	var (
+		name  string
+		price string
+	)
+	err := sharedDB.QueryRowContext(t.Context(),
+		`SELECT Name, CONVERT(NVARCHAR(40), Price) FROM Products WHERE Id = @p1`, id.UUID()).Scan(&name, &price)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", decimal.Zero, false
+	}
+	if err != nil {
+		t.Fatalf("reading product %s: %v", id, err)
+	}
+
+	return name, decimal.RequireFromString(price), true
+}
+
+func customerExists(t *testing.T, id domain.CustomerID) bool {
+	t.Helper()
+
+	var count int
+	if err := sharedDB.QueryRowContext(t.Context(),
+		`SELECT count(*) FROM Customers WHERE Id = @p1`, id.UUID()).Scan(&count); err != nil {
+		t.Fatalf("counting customers: %v", err)
+	}
+
+	return count == 1
+}
+
+func TestPlacingAnOrderAddsTheProductsThisServiceDidNotKnow(t *testing.T) {
+	repo := newRepository(t)
+
+	customer := newCustomer(t)
+	unknown := newProduct(t, "Pixel 9", 700)
+
+	order := newOrder(t, customer.ID, "ORD_P")
+	// Twice on purpose: two lines of one product are still one product.
+	if err := order.Add(unknown.ID, 1, unknown.Price); err != nil {
+		t.Fatalf("adding line: %v", err)
+	}
+	if err := order.Add(unknown.ID, 2, unknown.Price); err != nil {
+		t.Fatalf("adding line: %v", err)
+	}
+
+	if err := repo.Place(t.Context(), order, customer, []*domain.Product{unknown, unknown}); err != nil {
+		t.Fatalf("placing: %v", err)
+	}
+
+	// Without the product row the line's foreign key would have refused the
+	// order; with it, the order is there and readable.
+	name, price, found := storedProduct(t, unknown.ID)
+	if !found || name != "Pixel 9" || !price.Equal(decimal.NewFromInt(700)) {
+		t.Errorf("product = %q/%s (found %v), want Pixel 9 at 700", name, price, found)
+	}
+	if !customerExists(t, customer.ID) {
+		t.Error("the customer was not recorded")
+	}
+	if got, err := repo.ByID(t.Context(), order.ID()); err != nil || len(got.Items()) != 2 {
+		t.Errorf("order = %v (error %v), want it stored with both lines", got, err)
+	}
+}
+
+func TestPlacingAnOrderKeepsWhatIsKnownAboutAProduct(t *testing.T) {
+	repo := newRepository(t)
+
+	known := seedProduct(t, sharedDB) // "test product" at 100.00
+	customer := newCustomer(t)
+
+	// The basket saw it under another name and price.
+	renamed, err := domain.NewProduct(known, "renamed in the basket", decimal.NewFromInt(90))
+	if err != nil {
+		t.Fatalf("product: %v", err)
+	}
+
+	order := newOrder(t, customer.ID, "ORD_Q")
+	if err := order.Add(known, 1, renamed.Price); err != nil {
+		t.Fatalf("adding line: %v", err)
+	}
+
+	if err := repo.Place(t.Context(), order, customer, []*domain.Product{renamed}); err != nil {
+		t.Fatalf("placing: %v", err)
+	}
+
+	// The line records what was charged; the product row stays this
+	// service's own reference data rather than whatever the last basket said.
+	name, price, _ := storedProduct(t, known)
+	if name != "test product" || !price.Equal(decimal.NewFromInt(100)) {
+		t.Errorf("product = %q at %s, want it unchanged as test product at 100", name, price)
+	}
+}
+
+func TestAFailedPlacementLeavesNothingBehind(t *testing.T) {
+	repo := newRepository(t)
+
+	customer := newCustomer(t)
+	announced := newProduct(t, "announced", 100)
+	missing := newProduct(t, "never recorded", 100)
+
+	order := newOrder(t, customer.ID, "ORD_X")
+	// The line points at a product the placement does not add, so the
+	// order's foreign key refuses it - after the customer and the other
+	// product have been written in the same transaction.
+	if err := order.Add(missing.ID, 1, missing.Price); err != nil {
+		t.Fatalf("adding line: %v", err)
+	}
+
+	if err := repo.Place(t.Context(), order, customer, []*domain.Product{announced}); err == nil {
+		t.Fatal("placing an order for an unknown product should fail")
+	}
+
+	if _, _, found := storedProduct(t, announced.ID); found {
+		t.Error("a product was added for an order that was never stored")
+	}
+	if customerExists(t, customer.ID) {
+		t.Error("a customer was recorded for an order that was never stored")
+	}
+	if _, err := repo.ByID(t.Context(), order.ID()); err == nil {
+		t.Error("the order was stored despite the failure")
+	}
+}
 
 func TestExistingCardsBecomeLegacyTokens(t *testing.T) {
 	if testing.Short() {

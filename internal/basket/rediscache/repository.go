@@ -61,7 +61,10 @@ func (r *CachedRepository) GetByUserName(ctx context.Context, userName string) (
 	switch {
 	case err == nil:
 		var entry storedCart
-		if err := json.Unmarshal(cached, &entry); err == nil {
+		// An entry without a version was written before baskets had one.
+		// Serving it would hand a checkout an empty version, so it is read
+		// from the database instead, which always has one.
+		if err := json.Unmarshal(cached, &entry); err == nil && entry.Version != uuid.Nil {
 			r.log.DebugContext(ctx, "basket cache hit", "userName", userName)
 			return entry.cart(), nil
 		}
@@ -93,6 +96,12 @@ func (r *CachedRepository) GetByUserName(ctx context.Context, userName string) (
 // basket until the TTL expires. Reporting the failure lets the caller retry -
 // storing is an upsert, so a repeat is harmless.
 func (r *CachedRepository) Store(ctx context.Context, cart carts.ShoppingCart) error {
+	// The version is chosen here, before the write, so the database and the
+	// cache hold the same one. Left to the database, the cache would be
+	// refreshed with whatever the caller passed - no version at all - and a
+	// checkout served from it would derive its id from nothing.
+	cart.Version = uuid.New()
+
 	if err := r.inner.Store(ctx, cart); err != nil {
 		return err
 	}

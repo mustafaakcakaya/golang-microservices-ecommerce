@@ -22,23 +22,11 @@ type Line struct {
 	ProductID   uuid.UUID       `json:"productId"`
 	ProductName string          `json:"productName"`
 	Quantity    int             `json:"quantity"`
-	Price       messaging.Money `json:"price"`
+	UnitPrice   messaging.Money `json:"unitPrice"`
 }
 
-// CheckoutRequested is published when a customer checks out their basket.
-//
-// There are no card details here, and that absence is the contract's most
-// important property. A card number or security code on a broker is readable by
-// every consumer, sits in queues and logs, and outlives the request that
-// carried it. The customer is therefore identified, addressed and billed by
-// reference; what they pay with is not part of this message, and an order
-// created from it starts out unpaid.
-type CheckoutRequested struct {
-	messaging.Header
-
-	UserName   string    `json:"userName"`
-	CustomerID uuid.UUID `json:"customerId"`
-
+// Address is a postal address on a checkout.
+type Address struct {
 	FirstName    string `json:"firstName"`
 	LastName     string `json:"lastName"`
 	EmailAddress string `json:"emailAddress"`
@@ -46,17 +34,51 @@ type CheckoutRequested struct {
 	Country      string `json:"country"`
 	State        string `json:"state"`
 	ZipCode      string `json:"zipCode"`
-
-	TotalPrice messaging.Money `json:"totalPrice"`
-	Lines      []Line          `json:"lines"`
 }
 
-// Contract identifies CheckoutRequested on the wire.
-func (CheckoutRequested) Contract() messaging.Contract {
-	return messaging.Contract{EventType: "basket.checkout-requested", Version: 1}
+// Payment says how a checkout is paid for, by reference.
+//
+// The card itself stays in the Payment service. What travels is the token it
+// issued for the card and the last four digits, which are for showing the
+// customer which card they used and nothing else.
+type Payment struct {
+	PaymentToken  string `json:"paymentToken"`
+	CardLast4     string `json:"cardLast4"`
+	PaymentMethod int    `json:"paymentMethod"`
+}
+
+// CheckoutSubmitted is published when a customer checks out their basket.
+//
+// The items are the basket exactly as it was checked out, so the order is built
+// from what the customer bought. The total is their sum; a consumer recomputes
+// it and refuses a message where the two disagree, since that means the
+// services no longer agree about what was ordered.
+//
+// There is no card number, expiry or security code here, and that absence is
+// the contract's most important property. Card data on a broker is readable by
+// every consumer, sits in queues and logs, and outlives the request that
+// carried it.
+type CheckoutSubmitted struct {
+	messaging.Header
+
+	UserName   string    `json:"userName"`
+	CustomerID uuid.UUID `json:"customerId"`
+
+	TotalPrice messaging.Money `json:"totalPrice"`
+	Items      []Line          `json:"items"`
+
+	ShippingAddress Address `json:"shippingAddress"`
+	BillingAddress  Address `json:"billingAddress"`
+
+	Payment Payment `json:"payment"`
+}
+
+// Contract identifies CheckoutSubmitted on the wire.
+func (CheckoutSubmitted) Contract() messaging.Contract {
+	return messaging.Contract{EventType: "basket.checkout-submitted", Version: 1}
 }
 
 // Register adds every contract in this package to a registry.
 func Register(registry *messaging.Registry) {
-	registry.Register(func() messaging.Event { return &CheckoutRequested{} })
+	registry.Register(func() messaging.Event { return &CheckoutSubmitted{} })
 }

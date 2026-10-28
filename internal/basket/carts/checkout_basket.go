@@ -3,7 +3,6 @@ package carts
 import (
 	"context"
 	"net/http"
-
 	"strings"
 
 	"github.com/google/uuid"
@@ -17,9 +16,11 @@ import (
 
 // CheckoutBasketCommand turns a stored basket into a checkout.
 //
-// It asks for no card details. The checkout message does not carry them and an
-// order starts out unpaid, so collecting them here would mean holding card data
-// for no purpose - which is worse than not having it.
+// It carries no card details. The card goes to the Payment service, which
+// keeps it and hands back a token; only the token and the last four digits
+// come here. Neither the lines nor the total are part of the command either:
+// they are read from the stored basket, so a caller cannot check out something
+// other than what the basket holds.
 type CheckoutBasketCommand struct {
 	UserName   string    `json:"userName" validate:"required"`
 	CustomerID uuid.UUID `json:"customerId" validate:"required"`
@@ -31,6 +32,11 @@ type CheckoutBasketCommand struct {
 	Country      string `json:"country"`
 	State        string `json:"state"`
 	ZipCode      string `json:"zipCode"`
+
+	// PaymentToken is what the Payment service issued for the card.
+	PaymentToken  string `json:"paymentToken" validate:"required"`
+	CardLast4     string `json:"cardLast4" validate:"required,len=4,numeric"`
+	PaymentMethod int    `json:"paymentMethod"`
 }
 
 // CheckoutBasketResult reports whether the checkout was accepted.
@@ -67,12 +73,22 @@ func (h *CheckoutBasketHandler) Handle(
 		return CheckoutBasketResult{}, apperr.BadRequest("the basket of %s is empty", c.UserName)
 	}
 
+	// A stored basket always has a version, so a missing one means this is
+	// not a stored basket any more - a concurrent checkout removed it after it
+	// was read. Deriving an id from the empty version would record a second
+	// checkout of the same basket under an id nothing deduplicates against.
+	if cart.Version == uuid.Nil {
+		return CheckoutBasketResult{}, apperr.NotFound("Basket", c.UserName)
+	}
+
 	event := checkoutEvent(ctx, c, cart)
 	// Derived rather than random: two requests racing on the same basket agree
 	// on one id, so a double click records one message and produces one order.
 	event.ID = CheckoutID(c.UserName, cart.Version)
 
-	announcement, err := messaging.NewEnvelope(event, c.CustomerID.String())
+	// Keyed by the user: a basket is identified by its owner, and a broker
+	// that partitions keeps one user's checkouts in the order they happened.
+	announcement, err := messaging.NewEnvelope(event, c.UserName)
 	if err != nil {
 		return CheckoutBasketResult{}, err
 	}
@@ -106,23 +122,20 @@ func CheckoutID(userName string, basketVersion uuid.UUID) uuid.UUID {
 // The prices come from the basket rather than from the catalog: they are what
 // the customer was shown, discounts already applied, and an order records what
 // was charged at the time.
-func checkoutEvent(ctx context.Context, c CheckoutBasketCommand, cart ShoppingCart) *basketv1.CheckoutRequested {
-	lines := make([]basketv1.Line, 0, len(cart.Items))
+func checkoutEvent(ctx context.Context, c CheckoutBasketCommand, cart ShoppingCart) *basketv1.CheckoutSubmitted {
+	items := make([]basketv1.Line, 0, len(cart.Items))
 	for _, item := range cart.Items {
-		lines = append(lines, basketv1.Line{
+		items = append(items, basketv1.Line{
 			ProductID:   item.ProductID,
 			ProductName: item.ProductName,
 			Quantity:    item.Quantity,
-			Price:       messaging.NewMoney(item.Price),
+			UnitPrice:   messaging.NewMoney(item.Price),
 		})
 	}
 
-	return &basketv1.CheckoutRequested{
-		// The same id the error responses report as their trace id, so a
-		// request and the message it produced can be lined up afterwards.
-		Header:       messaging.NewHeader(httpx.CorrelationID(ctx)),
-		UserName:     c.UserName,
-		CustomerID:   c.CustomerID,
+	// One address: the checkout collects where the order goes and bills it
+	// there too.
+	address := basketv1.Address{
 		FirstName:    c.FirstName,
 		LastName:     c.LastName,
 		EmailAddress: c.EmailAddress,
@@ -130,8 +143,23 @@ func checkoutEvent(ctx context.Context, c CheckoutBasketCommand, cart ShoppingCa
 		Country:      c.Country,
 		State:        c.State,
 		ZipCode:      c.ZipCode,
-		TotalPrice:   messaging.NewMoney(cart.TotalPrice()),
-		Lines:        lines,
+	}
+
+	return &basketv1.CheckoutSubmitted{
+		// The same id the error responses report as their trace id, so a
+		// request and the message it produced can be lined up afterwards.
+		Header:          messaging.NewHeader(httpx.CorrelationID(ctx)),
+		UserName:        c.UserName,
+		CustomerID:      c.CustomerID,
+		TotalPrice:      messaging.NewMoney(cart.TotalPrice()),
+		Items:           items,
+		ShippingAddress: address,
+		BillingAddress:  address,
+		Payment: basketv1.Payment{
+			PaymentToken:  c.PaymentToken,
+			CardLast4:     c.CardLast4,
+			PaymentMethod: c.PaymentMethod,
+		},
 	}
 }
 

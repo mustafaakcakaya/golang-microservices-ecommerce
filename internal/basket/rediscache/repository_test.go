@@ -82,6 +82,8 @@ func (r *countingRepository) Delete(_ context.Context, userName string) error {
 func sampleCart(userName string) carts.ShoppingCart {
 	return carts.ShoppingCart{
 		UserName: userName,
+		// A stored basket always has one.
+		Version: uuid.New(),
 		Items: []carts.ShoppingCartItem{
 			{Quantity: 2, Color: "Red", Price: decimal.NewFromInt(500), ProductName: "iPhone X"},
 		},
@@ -320,5 +322,60 @@ func TestTheCachedBasketKeepsItsVersion(t *testing.T) {
 	// cache hit would quietly change what a double click does.
 	if cached.Version != stored.Version {
 		t.Errorf("version = %s, want %s", cached.Version, stored.Version)
+	}
+}
+
+func TestAStoredBasketIsCachedWithTheVersionThatWasStored(t *testing.T) {
+	client := newRedis(t)
+
+	inner := newCountingRepository()
+	repo := rediscache.NewCachedRepository(inner, client, time.Minute, discardLogger())
+	ctx := context.Background()
+
+	// As the API stores it: a client never sends a version.
+	request := sampleCart("fresh")
+	request.Version = uuid.Nil
+
+	if err := repo.Store(ctx, request); err != nil {
+		t.Fatalf("storing: %v", err)
+	}
+
+	cached, err := repo.GetByUserName(ctx, "fresh")
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if inner.reads != 0 {
+		t.Fatalf("inner reads = %d, want the read served from the cache", inner.reads)
+	}
+
+	// The cache and the database must agree, or a checkout served from the
+	// cache derives a different id than one served from the database.
+	if cached.Version == uuid.Nil || cached.Version != inner.items["fresh"].Version {
+		t.Errorf("cached version = %s, stored version = %s; want the same, non-empty one",
+			cached.Version, inner.items["fresh"].Version)
+	}
+}
+
+func TestACachedBasketWithoutAVersionIsReadFromTheDatabase(t *testing.T) {
+	client := newRedis(t)
+	ctx := context.Background()
+
+	stored := sampleCart("legacy")
+	inner := newCountingRepository(stored)
+	repo := rediscache.NewCachedRepository(inner, client, time.Minute, discardLogger())
+
+	// An entry written before baskets had versions.
+	if err := client.Set(ctx, "basket:legacy",
+		`{"userName":"legacy","items":[]}`, time.Minute).Err(); err != nil {
+		t.Fatalf("seeding the cache: %v", err)
+	}
+
+	cart, err := repo.GetByUserName(ctx, "legacy")
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if inner.reads != 1 || cart.Version != stored.Version {
+		t.Errorf("reads = %d, version = %s; want the database's basket, version %s",
+			inner.reads, cart.Version, stored.Version)
 	}
 }

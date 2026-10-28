@@ -2,6 +2,7 @@ package orders_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -15,36 +16,6 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/basketv1"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/inbox"
 )
-
-// fakeSnapshots records what the handler copied into this service.
-type fakeSnapshots struct {
-	customers map[domain.CustomerID]string
-	products  map[domain.ProductID]product
-}
-
-type product struct {
-	name  string
-	price decimal.Decimal
-}
-
-func newFakeSnapshots() *fakeSnapshots {
-	return &fakeSnapshots{
-		customers: map[domain.CustomerID]string{},
-		products:  map[domain.ProductID]product{},
-	}
-}
-
-func (s *fakeSnapshots) SaveCustomer(_ context.Context, id domain.CustomerID, name, _ string) error {
-	s.customers[id] = name
-	return nil
-}
-
-func (s *fakeSnapshots) SaveProduct(
-	_ context.Context, id domain.ProductID, name string, price decimal.Decimal,
-) error {
-	s.products[id] = product{name: name, price: price}
-	return nil
-}
 
 // fakeInbox is the consumer-side deduplication store.
 type fakeInbox struct {
@@ -60,13 +31,8 @@ func (i *fakeInbox) Complete(_ context.Context, messageID uuid.UUID, _ string) e
 	return nil
 }
 
-func checkoutEnvelope(t *testing.T, customerID uuid.UUID) messaging.Envelope {
-	t.Helper()
-
-	event := &basketv1.CheckoutRequested{
-		Header:       messaging.NewHeader("trace-1"),
-		UserName:     "swn01",
-		CustomerID:   customerID,
+func checkoutEvent(customerID uuid.UUID) *basketv1.CheckoutSubmitted {
+	shipping := basketv1.Address{
 		FirstName:    "Mustafa",
 		LastName:     "Akcakaya",
 		EmailAddress: "mustafa@example.com",
@@ -74,24 +40,43 @@ func checkoutEnvelope(t *testing.T, customerID uuid.UUID) messaging.Envelope {
 		Country:      "Turkey",
 		State:        "Istanbul",
 		ZipCode:      "34000",
-		TotalPrice:   messaging.NewMoney(decimal.NewFromInt(1400)),
-		Lines: []basketv1.Line{
+	}
+	billing := shipping
+	billing.AddressLine = "Billing Address"
+
+	return &basketv1.CheckoutSubmitted{
+		Header:     messaging.NewHeader("trace-1"),
+		UserName:   "swn01",
+		CustomerID: customerID,
+		TotalPrice: messaging.NewMoney(decimal.NewFromInt(1400)),
+		Items: []basketv1.Line{
 			{
 				ProductID:   uuid.New(),
 				ProductName: "iPhone X",
 				Quantity:    2,
-				Price:       messaging.NewMoney(decimal.NewFromInt(500)),
+				UnitPrice:   messaging.NewMoney(decimal.NewFromInt(500)),
 			},
 			{
 				ProductID:   uuid.New(),
 				ProductName: "Samsung 10",
 				Quantity:    1,
-				Price:       messaging.NewMoney(decimal.NewFromInt(400)),
+				UnitPrice:   messaging.NewMoney(decimal.NewFromInt(400)),
 			},
 		},
+		ShippingAddress: shipping,
+		BillingAddress:  billing,
+		Payment: basketv1.Payment{
+			PaymentToken:  paymentToken,
+			CardLast4:     "4444",
+			PaymentMethod: 1,
+		},
 	}
+}
 
-	envelope, err := messaging.NewEnvelope(event, customerID.String())
+func envelopeOf(t *testing.T, event *basketv1.CheckoutSubmitted) messaging.Envelope {
+	t.Helper()
+
+	envelope, err := messaging.NewEnvelope(event, event.UserName)
 	if err != nil {
 		t.Fatalf("enveloping: %v", err)
 	}
@@ -99,12 +84,17 @@ func checkoutEnvelope(t *testing.T, customerID uuid.UUID) messaging.Envelope {
 	return envelope
 }
 
-func TestACheckoutBecomesAnUnpaidOrderOfItsOwnLines(t *testing.T) {
+func checkoutEnvelope(t *testing.T, customerID uuid.UUID) messaging.Envelope {
+	t.Helper()
+
+	return envelopeOf(t, checkoutEvent(customerID))
+}
+
+func TestACheckoutBecomesAnOrderOfItsOwnItems(t *testing.T) {
 	t.Parallel()
 
 	repo := newFakeRepository()
-	snapshots := newFakeSnapshots()
-	handler := orders.NewCheckoutHandler(repo, snapshots)
+	handler := orders.NewCheckoutHandler(repo)
 
 	customerID := uuid.New()
 	if err := handler.Handle(t.Context(), checkoutEnvelope(t, customerID)); err != nil {
@@ -120,15 +110,25 @@ func TestACheckoutBecomesAnUnpaidOrderOfItsOwnLines(t *testing.T) {
 	// gets what they actually bought, at the prices they were shown.
 	items := order.Items()
 	if len(items) != 2 {
-		t.Fatalf("items = %+v, want both checkout lines", items)
+		t.Fatalf("items = %+v, want both checkout items", items)
 	}
 	if !order.TotalPrice().Equal(decimal.NewFromInt(1400)) {
 		t.Errorf("total = %s, want 1400", order.TotalPrice())
 	}
 
-	// No card details travelled, so the order is not paid for yet.
-	if !order.Payment().IsZero() || order.Status() != domain.OrderStatusDraft {
-		t.Errorf("order = %v/%v, want an unpaid draft", order.Payment(), order.Status())
+	// The checkout carries a payment token, so the order is paid by reference
+	// and pending rather than a draft.
+	payment := order.Payment()
+	if payment.PaymentToken() != paymentToken || payment.CardLast4() != "4444" || payment.PaymentMethod() != 1 {
+		t.Errorf("payment = %v, want the checkout's token, last four and method", payment)
+	}
+	if order.Status() != domain.OrderStatusPending {
+		t.Errorf("status = %v, want Pending", order.Status())
+	}
+
+	if order.ShippingAddress().AddressLine != "Test Address" || order.BillingAddress().AddressLine != "Billing Address" {
+		t.Errorf("addresses = %+v / %+v, want the checkout's shipping and billing addresses",
+			order.ShippingAddress(), order.BillingAddress())
 	}
 
 	// The domain fixes the length, so the user name cannot be the order name.
@@ -137,43 +137,123 @@ func TestACheckoutBecomesAnUnpaidOrderOfItsOwnLines(t *testing.T) {
 	}
 }
 
-func TestTheOrderRefersToProductsThisServiceHasRecorded(t *testing.T) {
+func TestTheOrderIsPlacedWithTheProductsAndCustomerItRefersTo(t *testing.T) {
 	t.Parallel()
 
 	repo := newFakeRepository()
-	snapshots := newFakeSnapshots()
-	handler := orders.NewCheckoutHandler(repo, snapshots)
+	handler := orders.NewCheckoutHandler(repo)
 
 	customerID := uuid.New()
 	if err := handler.Handle(t.Context(), checkoutEnvelope(t, customerID)); err != nil {
 		t.Fatalf("handling: %v", err)
 	}
 
-	// Ordering keeps its own copies: an order has to stay readable when the
-	// catalog renames or removes a product, and the order's foreign keys need
-	// something to point at.
-	if len(snapshots.products) != 2 {
-		t.Fatalf("recorded %d products, want both", len(snapshots.products))
+	// Handed over together, so they are written in the order's transaction:
+	// the order's foreign keys need them, and a crash between separate writes
+	// would leave one without the other.
+	if len(repo.products) != 2 {
+		t.Fatalf("placed with %d products, want both", len(repo.products))
+	}
+	known := map[domain.ProductID]*domain.Product{}
+	for _, product := range repo.products {
+		known[product.ID] = product
 	}
 	for _, item := range repo.saved[0].Items() {
-		recorded, known := snapshots.products[item.ProductID]
-		if !known {
-			t.Errorf("product %s was ordered but never recorded", item.ProductID)
+		product, ok := known[item.ProductID]
+		if !ok {
+			t.Errorf("product %s was ordered but not handed over", item.ProductID)
 			continue
 		}
-		// The price recorded is the one the order was placed at.
-		if !recorded.price.Equal(item.Price) {
-			t.Errorf("product %s recorded at %s, ordered at %s",
-				item.ProductID, recorded.price, item.Price)
+		// What the checkout knows about the product, for the case where this
+		// service has never seen it.
+		if !product.Price.Equal(item.Price) || product.Name == "" {
+			t.Errorf("product %s = %q at %s, want the checkout's name and price %s",
+				item.ProductID, product.Name, product.Price, item.Price)
 		}
 	}
 
-	customer, err := domain.NewCustomerID(customerID)
-	if err != nil {
-		t.Fatalf("customer id: %v", err)
+	if len(repo.customers) != 1 || repo.customers[0].ID.UUID() != customerID ||
+		repo.customers[0].Name != "Mustafa Akcakaya" {
+		t.Errorf("customers = %+v, want the buyer", repo.customers)
 	}
-	if name := snapshots.customers[customer]; name != "Mustafa Akcakaya" {
-		t.Errorf("customer recorded as %q, want the buyer's name", name)
+}
+
+func TestATotalThatDoesNotMatchItsItemsIsRejected(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepository()
+	handler := orders.NewCheckoutHandler(repo)
+
+	event := checkoutEvent(uuid.New())
+	event.TotalPrice = messaging.NewMoney(decimal.NewFromInt(1300))
+
+	err := handler.Handle(t.Context(), envelopeOf(t, event))
+
+	// Rejected rather than retried: no redelivery will make the numbers agree,
+	// and a message retried forever holds up every checkout behind it.
+	if !messaging.IsRejected(err) {
+		t.Fatalf("error = %v, want a rejection", err)
+	}
+	if !strings.Contains(err.Error(), "1300") || !strings.Contains(err.Error(), "1400") {
+		t.Errorf("error = %v, want both totals named", err)
+	}
+	if len(repo.saved) != 0 {
+		t.Error("an order was stored from a checkout whose total is wrong")
+	}
+}
+
+func TestACheckoutThatContradictsItselfIsRejected(t *testing.T) {
+	t.Parallel()
+
+	for name, spoil := range map[string]func(*basketv1.CheckoutSubmitted){
+		"no items":          func(e *basketv1.CheckoutSubmitted) { e.Items = nil; e.TotalPrice = messaging.NewMoney(decimal.Zero) },
+		"no payment token":  func(e *basketv1.CheckoutSubmitted) { e.Payment.PaymentToken = "" },
+		"not four digits":   func(e *basketv1.CheckoutSubmitted) { e.Payment.CardLast4 = "5555555555554444" },
+		"no address line":   func(e *basketv1.CheckoutSubmitted) { e.ShippingAddress.AddressLine = "" },
+		"no customer":       func(e *basketv1.CheckoutSubmitted) { e.CustomerID = uuid.Nil },
+		"no product id":     func(e *basketv1.CheckoutSubmitted) { e.Items[0].ProductID = uuid.Nil },
+		"no product name":   func(e *basketv1.CheckoutSubmitted) { e.Items[0].ProductName = "" },
+		"no billing e-mail": func(e *basketv1.CheckoutSubmitted) { e.BillingAddress.EmailAddress = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			repo := newFakeRepository()
+			handler := orders.NewCheckoutHandler(repo)
+
+			event := checkoutEvent(uuid.New())
+			spoil(event)
+
+			if err := handler.Handle(t.Context(), envelopeOf(t, event)); !messaging.IsRejected(err) {
+				t.Fatalf("error = %v, want a rejection", err)
+			}
+			if len(repo.saved) != 0 {
+				t.Error("nothing should be stored for a checkout that cannot become an order")
+			}
+		})
+	}
+}
+
+// failingRepository refuses every write, as a database that is down does.
+type failingRepository struct {
+	*fakeRepository
+}
+
+func (failingRepository) Place(context.Context, *domain.Order, *domain.Customer, []*domain.Product) error {
+	return errors.New("the database is unreachable")
+}
+
+func TestAFailureOfThisServiceIsRetriedRatherThanRejected(t *testing.T) {
+	t.Parallel()
+
+	handler := orders.NewCheckoutHandler(failingRepository{newFakeRepository()})
+
+	err := handler.Handle(t.Context(), checkoutEnvelope(t, uuid.New()))
+
+	// Nothing is wrong with the message, so it has to come back once the
+	// database does. Rejecting it would lose the order.
+	if err == nil || messaging.IsRejected(err) {
+		t.Fatalf("error = %v, want a plain failure that is delivered again", err)
 	}
 }
 
@@ -181,7 +261,7 @@ func TestTheSameCheckoutDeliveredTwiceMakesOneOrder(t *testing.T) {
 	t.Parallel()
 
 	repo := newFakeRepository()
-	handler := orders.NewCheckoutHandler(repo, newFakeSnapshots())
+	handler := orders.NewCheckoutHandler(repo)
 
 	deliver := inbox.Idempotent(&fakeInbox{done: map[uuid.UUID]bool{}},
 		"ordering-checkout", slog.New(slog.DiscardHandler), handler.Handle)
@@ -201,38 +281,11 @@ func TestTheSameCheckoutDeliveredTwiceMakesOneOrder(t *testing.T) {
 	}
 }
 
-func TestACheckoutWithoutLinesIsRefused(t *testing.T) {
-	t.Parallel()
-
-	repo := newFakeRepository()
-	handler := orders.NewCheckoutHandler(repo, newFakeSnapshots())
-
-	event := &basketv1.CheckoutRequested{
-		Header:       messaging.NewHeader(""),
-		CustomerID:   uuid.New(),
-		EmailAddress: "mustafa@example.com",
-		AddressLine:  "Test Address",
-	}
-	envelope, err := messaging.NewEnvelope(event, event.CustomerID.String())
-	if err != nil {
-		t.Fatalf("enveloping: %v", err)
-	}
-
-	// An order with no lines has nothing to fulfil; failing means the message
-	// is delivered again rather than quietly becoming an empty order.
-	if err := handler.Handle(t.Context(), envelope); err == nil {
-		t.Fatal("a checkout with no lines should be refused")
-	}
-	if len(repo.saved) != 0 {
-		t.Error("nothing should be stored for a checkout with no lines")
-	}
-}
-
 func TestOrderReferencesDoNotRepeat(t *testing.T) {
 	t.Parallel()
 
 	repo := newFakeRepository()
-	handler := orders.NewCheckoutHandler(repo, newFakeSnapshots())
+	handler := orders.NewCheckoutHandler(repo)
 
 	seen := map[string]bool{}
 	for range 200 {

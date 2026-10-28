@@ -128,7 +128,7 @@ func message() outbox.Message {
 	return outbox.Message{
 		Envelope: messaging.Envelope{
 			ID:          uuid.New(),
-			Contract:    messaging.Contract{EventType: "basket.checkout-requested", Version: 1},
+			Contract:    messaging.Contract{EventType: "basket.checkout-submitted", Version: 1},
 			AggregateID: uuid.NewString(),
 			Payload:     []byte(`{}`),
 		},

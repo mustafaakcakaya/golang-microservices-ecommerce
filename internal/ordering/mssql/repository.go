@@ -36,24 +36,7 @@ func NewOrderRepository(db *sql.DB, mapEvent EventMapper) *OrderRepository {
 // messages its changes produced.
 func (r *OrderRepository) Save(ctx context.Context, order *domain.Order) error {
 	err := r.inTx(ctx, func(tx *sql.Tx) error {
-		if err := upsertOrder(ctx, tx, order); err != nil {
-			return err
-		}
-
-		// Lines are replaced wholesale rather than diffed: the aggregate owns
-		// them, so the stored set is whatever it currently holds.
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM OrderItems WHERE OrderId = @p1`, asGUID(order.ID().UUID())); err != nil {
-			return fmt.Errorf("clearing order lines: %w", err)
-		}
-
-		for _, item := range order.Items() {
-			if err := insertOrderItem(ctx, tx, order.ID(), item); err != nil {
-				return err
-			}
-		}
-
-		return r.stageEvents(ctx, tx, order.Events())
+		return r.saveOrder(ctx, tx, order)
 	})
 	if err != nil {
 		return err
@@ -63,6 +46,82 @@ func (r *OrderRepository) Save(ctx context.Context, order *domain.Order) error {
 	// the commit would lose them on a rollback, leaving an order that was saved
 	// on a later attempt but never announced.
 	order.PullEvents()
+
+	return nil
+}
+
+// Place saves a new order together with the customer and the products it
+// refers to, in one transaction.
+//
+// The order's foreign keys point at both, so writing them separately would
+// leave a window - and after a crash, a row - where one exists without the
+// other. In one transaction the checkout either produces a complete order or
+// nothing, and the redelivery that follows a failure starts from scratch.
+func (r *OrderRepository) Place(
+	ctx context.Context, order *domain.Order, customer *domain.Customer, products []*domain.Product,
+) error {
+	err := r.inTx(ctx, func(tx *sql.Tx) error {
+		if err := saveCustomer(ctx, tx, customer); err != nil {
+			return err
+		}
+
+		seen := make(map[domain.ProductID]bool, len(products))
+		for _, product := range products {
+			// The same product on two lines is one product.
+			if seen[product.ID] {
+				continue
+			}
+			seen[product.ID] = true
+
+			if err := addProductIfUnknown(ctx, tx, product); err != nil {
+				return err
+			}
+		}
+
+		return r.saveOrder(ctx, tx, order)
+	})
+	if err != nil {
+		return err
+	}
+
+	order.PullEvents()
+
+	return nil
+}
+
+// saveCustomer records the customer, or refreshes what is known about them.
+func saveCustomer(ctx context.Context, tx *sql.Tx, customer *domain.Customer) error {
+	const query = `
+		MERGE Customers WITH (HOLDLOCK) AS target
+		USING (SELECT @p1 AS Id) AS source ON target.Id = source.Id
+		WHEN MATCHED THEN UPDATE SET Name = @p2, Email = @p3, LastModifiedAt = SYSUTCDATETIME()
+		WHEN NOT MATCHED THEN INSERT (Id, Name, Email, CreatedAt)
+			VALUES (@p1, @p2, @p3, SYSUTCDATETIME());`
+
+	if _, err := tx.ExecContext(ctx, query, asGUID(customer.ID.UUID()), customer.Name, customer.Email); err != nil {
+		return fmt.Errorf("recording customer %s: %w", customer.ID, err)
+	}
+
+	return nil
+}
+
+// addProductIfUnknown adds a product this service has not seen before.
+//
+// A product it already holds is left as it is. The table is Ordering's own
+// reference data, written once from the first order that mentioned the
+// product; letting every checkout overwrite it would make the stored name and
+// price whatever the last basket happened to say. The lock is what keeps two
+// orders introducing the same product at once from both trying to insert it.
+func addProductIfUnknown(ctx context.Context, tx *sql.Tx, product *domain.Product) error {
+	const query = `
+		MERGE Products WITH (HOLDLOCK) AS target
+		USING (SELECT @p1 AS Id) AS source ON target.Id = source.Id
+		WHEN NOT MATCHED THEN INSERT (Id, Name, Price, CreatedAt)
+			VALUES (@p1, @p2, @p3, SYSUTCDATETIME());`
+
+	if _, err := tx.ExecContext(ctx, query, asGUID(product.ID.UUID()), product.Name, product.Price.String()); err != nil {
+		return fmt.Errorf("recording product %s: %w", product.ID, err)
+	}
 
 	return nil
 }
@@ -162,6 +221,29 @@ func (r *OrderRepository) Delete(ctx context.Context, id domain.OrderID) error {
 	}
 
 	return nil
+}
+
+// saveOrder writes the order, its lines and its outbox messages on the
+// caller's transaction.
+func (r *OrderRepository) saveOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
+	if err := upsertOrder(ctx, tx, order); err != nil {
+		return err
+	}
+
+	// Lines are replaced wholesale rather than diffed: the aggregate owns
+	// them, so the stored set is whatever it currently holds.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM OrderItems WHERE OrderId = @p1`, asGUID(order.ID().UUID())); err != nil {
+		return fmt.Errorf("clearing order lines: %w", err)
+	}
+
+	for _, item := range order.Items() {
+		if err := insertOrderItem(ctx, tx, order.ID(), item); err != nil {
+			return err
+		}
+	}
+
+	return r.stageEvents(ctx, tx, order.Events())
 }
 
 // inTx runs fn in a transaction, rolling back on any failure.

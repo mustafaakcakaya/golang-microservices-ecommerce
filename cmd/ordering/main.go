@@ -113,14 +113,14 @@ func checkoutSubscription(
 		return nil, nil, err
 	}
 
-	contracts := []messaging.Contract{(basketv1.CheckoutRequested{}).Contract()}
+	contracts := []messaging.Contract{(basketv1.CheckoutSubmitted{}).Contract()}
 
 	subscriber, err := broker.NewSubscriber(brokerConfig, consumerName, contracts, log)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	handler := orders.NewCheckoutHandler(repo, mssql.NewSnapshotStore(db))
+	handler := orders.NewCheckoutHandler(repo)
 
 	// Delivery is at-least-once, so the same checkout can arrive more than
 	// once; the inbox is what keeps one checkout from becoming two orders.

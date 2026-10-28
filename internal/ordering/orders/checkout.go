@@ -14,80 +14,97 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/basketv1"
 )
 
-// Snapshots records the customers and products an order refers to.
-//
-// Ordering keeps its own copies so an order stays readable when the catalog
-// moves on, and so the order's foreign keys have something to point at.
-type Snapshots interface {
-	SaveCustomer(ctx context.Context, id domain.CustomerID, name, email string) error
-	SaveProduct(ctx context.Context, id domain.ProductID, name string, price decimal.Decimal) error
-}
-
 // CheckoutHandler turns a checkout from Basket into an order.
 type CheckoutHandler struct {
-	repo      Repository
-	snapshots Snapshots
+	repo Repository
 }
 
 // NewCheckoutHandler wires the handler.
-func NewCheckoutHandler(repo Repository, snapshots Snapshots) *CheckoutHandler {
-	return &CheckoutHandler{repo: repo, snapshots: snapshots}
+func NewCheckoutHandler(repo Repository) *CheckoutHandler {
+	return &CheckoutHandler{repo: repo}
 }
 
 // Handle creates an order from one checkout message.
 //
-// The order is built from the lines the message carries, at the prices the
+// The order is built from the items the message carries, at the prices the
 // customer was shown. The alternative - looking the products up in the catalog
 // now - would price the order at whatever the catalog says at the moment it is
 // processed, which is not what anyone agreed to.
 //
-// The message carries no card details, so the order starts out unpaid.
+// A message that contradicts itself is rejected rather than retried: no number
+// of redeliveries will make a total match lines it does not match, and a
+// message retried forever holds up every checkout behind it. Failures of this
+// service's own - the database being down - are returned as they are, so the
+// message comes back once it can be handled.
 func (h *CheckoutHandler) Handle(ctx context.Context, envelope messaging.Envelope) error {
-	var event basketv1.CheckoutRequested
+	var event basketv1.CheckoutSubmitted
 	if err := messaging.Unmarshal(envelope.Payload, &event); err != nil {
-		return err
+		return messaging.Reject(err)
 	}
 
-	if len(event.Lines) == 0 {
-		return fmt.Errorf("checkout %s carries no lines", envelope.ID)
+	order, customer, products, err := h.orderFrom(event)
+	if err != nil {
+		return messaging.Reject(fmt.Errorf("checkout %s: %w", envelope.ID, err))
+	}
+
+	return h.repo.Place(ctx, order, customer, products)
+}
+
+// orderFrom builds the order the checkout describes, and the customer and
+// products it refers to.
+func (h *CheckoutHandler) orderFrom(
+	event basketv1.CheckoutSubmitted,
+) (*domain.Order, *domain.Customer, []*domain.Product, error) {
+	if len(event.Items) == 0 {
+		return nil, nil, nil, fmt.Errorf("it carries no items")
+	}
+
+	// Recomputed rather than trusted. A total that does not match its lines
+	// means Basket and this service disagree about the order, and guessing
+	// which side is right would hide that.
+	if linesTotal := totalOf(event.Items); !linesTotal.Equal(event.TotalPrice.Decimal) {
+		return nil, nil, nil, fmt.Errorf("its total %s does not match its items (%s)",
+			event.TotalPrice.Decimal, linesTotal)
 	}
 
 	customerID, err := domain.NewCustomerID(event.CustomerID)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
-
-	// Recorded before the order is saved, because the order's foreign keys
-	// refer to them. Both writes are upserts, so a retry is harmless.
-	if err := h.snapshots.SaveCustomer(ctx, customerID, customerName(event), event.EmailAddress); err != nil {
-		return err
+	customer, err := domain.NewCustomer(customerID, customerName(event), event.ShippingAddress.EmailAddress)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("customer: %w", err)
 	}
 
 	order, err := h.newOrder(event, customerID)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
-	for _, line := range event.Lines {
+	products := make([]*domain.Product, 0, len(event.Items))
+	for _, line := range event.Items {
 		productID, err := domain.NewProductID(line.ProductID)
 		if err != nil {
-			return err
+			return nil, nil, nil, err
 		}
 
-		if err := h.snapshots.SaveProduct(ctx, productID, line.ProductName, line.Price.Decimal); err != nil {
-			return err
+		product, err := domain.NewProduct(productID, line.ProductName, line.UnitPrice.Decimal)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("product %s: %w", productID, err)
 		}
-		if err := order.Add(productID, line.Quantity, line.Price.Decimal); err != nil {
-			return err
+		products = append(products, product)
+
+		if err := order.Add(productID, line.Quantity, line.UnitPrice.Decimal); err != nil {
+			return nil, nil, nil, err
 		}
 	}
 
-	return h.repo.Save(ctx, order)
+	return order, customer, products, nil
 }
 
 // newOrder builds the aggregate the checkout describes.
 func (h *CheckoutHandler) newOrder(
-	event basketv1.CheckoutRequested, customerID domain.CustomerID,
+	event basketv1.CheckoutSubmitted, customerID domain.CustomerID,
 ) (*domain.Order, error) {
 	orderID, err := domain.NewOrderID(uuid.New())
 	if err != nil {
@@ -99,23 +116,44 @@ func (h *CheckoutHandler) newOrder(
 		return nil, err
 	}
 
-	// One address: a checkout collects where the order goes, and billing
-	// without a payment to bill has nothing else to say.
-	address, err := domain.NewAddress(
-		event.FirstName, event.LastName, event.EmailAddress,
-		event.AddressLine, event.Country, event.State, event.ZipCode,
-	)
+	shipping, err := addressOf(event.ShippingAddress)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("shipping address: %w", err)
+	}
+	billing, err := addressOf(event.BillingAddress)
+	if err != nil {
+		return nil, fmt.Errorf("billing address: %w", err)
 	}
 
-	return domain.NewUnpaidOrder(orderID, customerID, orderName, address, address), nil
+	payment, err := domain.NewPayment(
+		event.Payment.PaymentToken, event.Payment.CardLast4, event.Payment.PaymentMethod)
+	if err != nil {
+		return nil, fmt.Errorf("payment: %w", err)
+	}
+
+	return domain.NewOrder(orderID, customerID, orderName, shipping, billing, payment), nil
+}
+
+func addressOf(address basketv1.Address) (domain.Address, error) {
+	return domain.NewAddress(
+		address.FirstName, address.LastName, address.EmailAddress,
+		address.AddressLine, address.Country, address.State, address.ZipCode,
+	)
+}
+
+// totalOf sums the items the way an order sums its lines.
+func totalOf(items []basketv1.Line) decimal.Decimal {
+	total := decimal.Zero
+	for _, line := range items {
+		total = total.Add(line.UnitPrice.Mul(decimal.NewFromInt(int64(line.Quantity))))
+	}
+	return total
 }
 
 // customerName is what to call the buyer, falling back to the name they signed
 // in with when they gave no other.
-func customerName(event basketv1.CheckoutRequested) string {
-	full := strings.TrimSpace(event.FirstName + " " + event.LastName)
+func customerName(event basketv1.CheckoutSubmitted) string {
+	full := strings.TrimSpace(event.ShippingAddress.FirstName + " " + event.ShippingAddress.LastName)
 	if full == "" {
 		return event.UserName
 	}

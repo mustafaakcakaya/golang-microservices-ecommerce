@@ -53,6 +53,10 @@ func (r *BasketRepository) GetByUserName(ctx context.Context, userName string) (
 }
 
 // Store writes the basket, replacing any existing one for that user.
+//
+// The cart's version is used when it has one. A caller passing a version it
+// read earlier would make two different baskets look alike, so only a writer
+// that has just chosen a fresh one should set it.
 func (r *BasketRepository) Store(ctx context.Context, cart carts.ShoppingCart) error {
 	// A new version on every write, so two requests reading the same basket
 	// see the same value and a later write is recognisably a different basket.
@@ -72,7 +76,14 @@ func (r *BasketRepository) Store(ctx context.Context, cart carts.ShoppingCart) e
 		return fmt.Errorf("encoding basket %q: %w", cart.UserName, err)
 	}
 
-	if _, err := r.pool.Exec(ctx, query, cart.UserName, encoded, uuid.New()); err != nil {
+	// A decorator in front may have chosen the version already, so that what
+	// it caches matches what is stored; otherwise every write gets a new one.
+	version := cart.Version
+	if version == uuid.Nil {
+		version = uuid.New()
+	}
+
+	if _, err := r.pool.Exec(ctx, query, cart.UserName, encoded, version); err != nil {
 		return fmt.Errorf("storing basket %q: %w", cart.UserName, err)
 	}
 

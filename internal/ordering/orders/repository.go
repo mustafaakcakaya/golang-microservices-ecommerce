@@ -18,6 +18,15 @@ type Repository interface {
 	// Save inserts or replaces the order together with its lines.
 	Save(ctx context.Context, order *domain.Order) error
 
+	// Place saves a new order together with the customer and products it
+	// refers to, in one transaction.
+	//
+	// The customer is recorded or refreshed. A product this service does not
+	// know yet is added; one it knows keeps the name and price it already
+	// has, because those are this service's reference data rather than a
+	// mirror of whatever the caller last saw.
+	Place(ctx context.Context, order *domain.Order, customer *domain.Customer, products []*domain.Product) error
+
 	// ByID returns apperr.NotFound when no order has the id.
 	ByID(ctx context.Context, id domain.OrderID) (*domain.Order, error)
 

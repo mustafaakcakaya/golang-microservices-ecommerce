@@ -93,6 +93,8 @@ func noDiscounts() *fakeDiscounts { return &fakeDiscounts{amounts: map[string]in
 func sampleCart(userName string) carts.ShoppingCart {
 	return carts.ShoppingCart{
 		UserName: userName,
+		// A stored basket always has one.
+		Version: uuid.New(),
 		Items: []carts.ShoppingCartItem{
 			{Quantity: 2, Color: "Red", Price: decimal.NewFromInt(500), ProductID: uuid.New(), ProductName: "iPhone X"},
 			{Quantity: 1, Color: "Blue", Price: decimal.NewFromInt(400), ProductID: uuid.New(), ProductName: "Samsung 10"},

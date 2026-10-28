@@ -17,7 +17,7 @@ import (
 func announcement(aggregateID string) messaging.Envelope {
 	return messaging.Envelope{
 		ID:            uuid.New(),
-		Contract:      messaging.Contract{EventType: "basket.checkout-requested", Version: 1},
+		Contract:      messaging.Contract{EventType: "basket.checkout-submitted", Version: 1},
 		AggregateID:   aggregateID,
 		CorrelationID: "trace-1",
 		OccurredOnUTC: time.Now().UTC(),
@@ -34,7 +34,7 @@ func TestCheckoutClearsTheBasketAndRecordsTheAnnouncement(t *testing.T) {
 		t.Fatalf("storing: %v", err)
 	}
 
-	message := announcement("customer-1")
+	message := announcement("checkout-1")
 	if err := repo.Checkout(ctx, "checkout-1", message); err != nil {
 		t.Fatalf("checking out: %v", err)
 	}

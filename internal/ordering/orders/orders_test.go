@@ -28,6 +28,10 @@ const paymentToken = "pt_zqxzqxzqxzqx"
 type fakeRepository struct {
 	saved []*domain.Order
 	items map[uuid.UUID]*domain.Order
+
+	// What Place was handed alongside the order.
+	customers []*domain.Customer
+	products  []*domain.Product
 }
 
 func newFakeRepository(seed ...*domain.Order) *fakeRepository {
@@ -42,6 +46,15 @@ func (r *fakeRepository) Save(_ context.Context, order *domain.Order) error {
 	r.items[order.ID().UUID()] = order
 	r.saved = append(r.saved, order)
 	return nil
+}
+
+func (r *fakeRepository) Place(
+	ctx context.Context, order *domain.Order, customer *domain.Customer, products []*domain.Product,
+) error {
+	r.customers = append(r.customers, customer)
+	r.products = append(r.products, products...)
+
+	return r.Save(ctx, order)
 }
 
 func (r *fakeRepository) ByID(_ context.Context, id domain.OrderID) (*domain.Order, error) {
