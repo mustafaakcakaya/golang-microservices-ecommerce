@@ -1,10 +1,11 @@
 import { api } from "./client";
-import type { Cart, CartItem, Checkout, Order, Product } from "./types";
+import type { Card, Cart, CartItem, Checkout, Order, PaymentToken, Product } from "./types";
 
 // Each service sits behind its own prefix on the gateway.
 const catalog = "/catalog-service";
 const basket = "/basket-service";
 const ordering = "/ordering-service";
+const payment = "/payment-service";
 
 export const catalogApi = {
   products: (pageSize = 12) =>
@@ -36,4 +37,10 @@ export const orderingApi = {
     api
       .get<{ orders: Order[] }>(`${ordering}/orders/customer/${customerId}`)
       .then((r) => r.orders ?? []),
+};
+
+export const paymentApi = {
+  /** Hands the card to the Payment service, the only one that keeps it, and
+   *  returns the token every other call uses instead. */
+  tokenize: (card: Card) => api.post<PaymentToken>(`${payment}/payment/tokens`, card),
 };

@@ -28,10 +28,9 @@ export type OrderItem = {
   price: number;
 };
 
+/** How an order was paid, as far as anyone but the Payment service may know. */
 export type Payment = {
-  cardName: string;
-  maskedCardNumber: string;
-  expiration: string;
+  cardLast4: string;
   paymentMethod: number;
 };
 
@@ -42,7 +41,7 @@ export type Order = {
   status: string;
   shippingAddress: Address;
   billingAddress: Address;
-  // Absent until the order is paid for: a checkout carries no card details.
+  // Absent for orders stored without a payment.
   payment: Payment | null;
   orderItems: OrderItem[];
   totalPrice: number;
@@ -58,8 +57,8 @@ export type Address = {
   zipCode: string;
 };
 
-/** What a checkout asks for. No card details: the message that leaves Basket
- *  carries none, so collecting them here would serve no purpose. */
+/** What Basket is told at checkout. No card: only the token the Payment
+ *  service issued for it, and the last four digits to show the customer. */
 export type Checkout = {
   userName: string;
   customerId: string;
@@ -70,4 +69,20 @@ export type Checkout = {
   country: string;
   state: string;
   zipCode: string;
+  paymentToken: string;
+  cardLast4: string;
+  paymentMethod: number;
+};
+
+/** The card, which goes to the Payment service and nowhere else. */
+export type Card = {
+  cardName: string;
+  cardNumber: string;
+  expiration: string;
+  cvv: string;
+};
+
+export type PaymentToken = {
+  paymentToken: string;
+  cardLast4: string;
 };

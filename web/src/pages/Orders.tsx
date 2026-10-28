@@ -48,9 +48,9 @@ export function Orders() {
               <td>{order.orderName}</td>
               <td>{order.status}</td>
               <td>{order.orderItems.length}</td>
-              {/* An order placed through checkout has no payment yet, and the
-                  API says so with null rather than with empty strings. */}
-              <td>{order.payment ? order.payment.maskedCardNumber : "Not paid yet"}</td>
+              {/* Only the last four digits ever reach the storefront. Orders
+                  stored without a payment come back as null. */}
+              <td>{order.payment ? `•••• ${order.payment.cardLast4}` : "No payment"}</td>
               <td className="price">{price(order.totalPrice)}</td>
             </tr>
           ))}
