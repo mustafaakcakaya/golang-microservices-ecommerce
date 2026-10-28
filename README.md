@@ -1,7 +1,7 @@
 # golang-microservices-ecommerce
 
 An e-commerce microservices project written in Go. The domain is split across
-four services; each owns its data and uses the persistence technology its
+five services; each owns its data and uses the persistence technology its
 problem calls for.
 
 ## Services
@@ -12,6 +12,7 @@ problem calls for.
 | Basket | Shopping basket | PostgreSQL + Redis | ready |
 | Discount | Coupons | SQLite, over gRPC | ready |
 | Ordering | Order lifecycle | SQL Server | ready |
+| Payment | Holds cards, issues payment tokens | PostgreSQL | ready |
 | ordering-worker | Publishes outbox messages | — | ready |
 | gateway | One public address, rate limited at the edge | — | ready |
 | web | React storefront, talks only to the gateway | — | ready |
@@ -32,14 +33,20 @@ problem calls for.
   message announcing it are written in the same SQL transaction; a separate
   worker reads them through SQL Server's change tables and publishes them.
 - **Domain events are not integration events**: domain events stay inside the
-  service, and only explicit versioned contracts leave it. Payment data - card
-  numbers, security codes - never reaches the outbox, a log or the broker.
+  service, and only explicit versioned contracts leave it.
+- **Cards stay in one service**: Payment keeps the card and issues a token for
+  it. Basket, Ordering and every message between them carry the token and the
+  last four digits, never the number, the expiry or the security code - and the
+  security code is not stored even by Payment.
 - **At-least-once delivery with consumer-side deduplication**: repeats are
-  recognised by the broker message id.
-- **Write and read shapes are separate**: a command accepts a card, a view never
-  returns one. The payment types redact themselves in both their `fmt` and JSON
-  representations, so neither a log line nor a response body can carry a card
-  number by accident.
+  recognised by the broker message id. A message that can never succeed - a
+  checkout whose total does not match its items - is rejected and moved to an
+  error queue (RabbitMQ) or a `.rejected` topic (Kafka) instead of being
+  retried forever.
+- **Write and read shapes are separate**: a command accepts a payment token, a
+  view returns only the last four digits. The payment types redact themselves
+  in both their `fmt` and JSON representations, so neither a log line nor a
+  response body can carry a token or a card by accident.
 
 See [docs/architecture.md](docs/architecture.md) for why the outbox exists and
 what the delivery guarantees actually are, and
@@ -53,7 +60,7 @@ cmd/           one main package per service
 web/           React storefront (Vite, TypeScript)
 internal/
   platform/    shared code (cqrs, apperr, pagination, validation, httpx, health)
-  catalog/  basket/  discount/
+  catalog/  basket/  discount/  payment/
   ordering/
     domain/       aggregate, value objects, domain events - no outside dependencies
     orders/       command and query handlers, request and view contracts, routes
@@ -79,7 +86,7 @@ docker compose -f deploy/compose.yaml up --build
 Open the storefront on <http://localhost:6106>. It talks only to the gateway on
 `6105`; the services keep their own ports for local work - Catalog `6100`,
 Basket `6101`, Discount `6102` (gRPC), Ordering `6103`, ordering-worker `6104`
-(health only). RabbitMQ's management UI is on `15682`. Ports can be changed with environment variables; see the table at
+(health only), Payment `6107`. RabbitMQ's management UI is on `15682`. Ports can be changed with environment variables; see the table at
 the top of `deploy/compose.yaml`.
 
 To run against Kafka instead:
@@ -102,9 +109,9 @@ npm run dev     # with the stack running; /api is forwarded to the gateway
 npm run build   # type check and produce the static files nginx serves
 ```
 
-The checkout form asks for an address and nothing else. The message Basket
-publishes carries no card details and the order it produces starts out unpaid,
-so collecting them would mean holding card data for no purpose.
+The checkout form sends the card to the Payment service first and gets a token
+back. Only the token and the last four digits go to Basket, so the card never
+reaches the basket, the order or the broker.
 
 ## Development
 

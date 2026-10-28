@@ -1,6 +1,6 @@
 # Architecture
 
-Four services, each owning its own data and its own persistence technology.
+Five services, each owning its own data and its own persistence technology.
 They talk to each other over HTTP and gRPC for questions that need an answer
 now, and over a message broker for facts that others need to know about.
 
@@ -10,6 +10,7 @@ now, and over a message broker for facts that others need to know about.
 | Basket | Shopping baskets | PostgreSQL + Redis |
 | Discount | Coupons | SQLite, served over gRPC |
 | Ordering | Order lifecycle | SQL Server |
+| Payment | Holds cards, issues payment tokens | PostgreSQL |
 | ordering-worker | Publishes Ordering's outbox | — |
 
 ## The problem the Ordering service solves
@@ -111,13 +112,52 @@ a consumer that has not been redeployed still reads what it was written
 against. A reader that does not know an (event type, version) pair refuses the
 message rather than forwarding what it cannot read.
 
-**No payment data leaves the service.** An order carries a card number, an
-expiry and a security code; none of them are mapped into any contract, so they
-cannot reach the outbox, the broker or a log line. The types enforce it as well
-as the mapping does: both the domain's `Payment` and the API's `PaymentInput`
-refuse to render themselves, in `fmt` and in JSON, and the read model exposes
-only a masked number. Reading an order back over HTTP is not a way to read a
-card number out of the database.
+**No payment data leaves the service.** An order holds a payment token, the
+last four digits of the card and the payment method; the token is not mapped
+into any contract, so it cannot reach the outbox, the broker or a log line. The
+types enforce it as well as the mapping does: both the domain's `Payment` and
+the API's `PaymentInput` refuse to render the token, in `fmt` and in JSON, and
+the read model exposes only the last four digits.
+
+## Checkout: from basket to order
+
+A checkout crosses three services, and the card stops at the first one.
+
+```
+storefront --card--> Payment          keeps the card, returns a token
+storefront --token-> Basket           one transaction: basket deleted,
+                                      basket.checkout-submitted v1 recorded
+Basket relay ------> broker           polls basket_outbox_messages
+broker ------------> Ordering         inbox, then one transaction:
+                                      customer, unknown products, order
+```
+
+**Payment** checks the card (Luhn, an MM/YY expiry that has not passed, a
+three- or four-digit security code), stores the number, the expiry and the name
+in its own database, and answers with a random `pt_` token and the last four
+digits. The security code is checked for shape and dropped - it is never
+stored, logged or returned - and no validation message repeats what was sent.
+The number is stored as given: a real system would encrypt it with a key held
+elsewhere, or hand it to a payment provider's vault.
+
+**Basket** reads the lines and the total from the stored basket, never from
+the request, and refuses an empty one. The message id is derived from the
+basket's version, so two requests racing on one basket record one message; a
+basket that has no version any more was removed by a concurrent checkout and
+answers 404 rather than deriving a second id. The outbox stores the same
+envelope Ordering's does - event type, version, aggregate id (the user name),
+payload - and the relay publishes it through the same publisher.
+
+**Ordering** builds the order from the message's items and recomputes the
+total. A total that does not match its items is **rejected**: no number of
+redeliveries will change it, so the message is moved to the consumer's error
+queue (`ordering-checkout_error` on RabbitMQ, `<topic>.rejected` on Kafka) with
+the reason in a header, instead of being retried forever ahead of every other
+checkout. A failure of Ordering's own, such as the database being down, is not
+rejected; the message comes back. Products Ordering has not seen are added in
+the order's transaction; known products keep the name and price they already
+have, since that table is Ordering's reference data rather than a mirror of the
+last basket.
 
 ## Choosing a broker
 
@@ -148,4 +188,8 @@ order, waiting for every in-sync replica.
 | Domain event to contract mapping | `internal/ordering/integration` |
 | Capture reader, checkpoint, retry | `internal/ordering/outbox` |
 | Contracts, envelope, publishers | `internal/platform/messaging` |
+| Checkout contract | `internal/platform/messaging/basketv1` |
+| Basket checkout and relay | `internal/basket/carts`, `internal/basket/outbox` |
+| Checkout consumer | `internal/ordering/orders/checkout.go` |
+| Cards and tokens | `internal/payment` |
 | Consumer-side deduplication | `internal/platform/messaging/inbox` |
