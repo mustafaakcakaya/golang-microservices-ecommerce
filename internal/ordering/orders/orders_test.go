@@ -74,16 +74,6 @@ func (r *fakeRepository) List(_ context.Context, page pagination.Request) ([]*do
 	return all[start:end], int64(len(all)), nil
 }
 
-func (r *fakeRepository) ByName(_ context.Context, name string) ([]*domain.Order, error) {
-	var matches []*domain.Order
-	for _, order := range r.all() {
-		if strings.Contains(order.OrderName().String(), name) {
-			matches = append(matches, order)
-		}
-	}
-	return matches, nil
-}
-
 func (r *fakeRepository) ByCustomer(_ context.Context, customerID domain.CustomerID) ([]*domain.Order, error) {
 	var matches []*domain.Order
 	for _, order := range r.all() {
@@ -111,7 +101,7 @@ func (r *fakeRepository) all() []*domain.Order {
 	}
 
 	slices.SortFunc(all, func(a, b *domain.Order) int {
-		return strings.Compare(a.OrderName().String(), b.OrderName().String())
+		return strings.Compare(a.ID().String(), b.ID().String())
 	})
 
 	return all
@@ -140,7 +130,6 @@ func samplePayment() orders.PaymentInput {
 func sampleCommand() orders.CreateOrderCommand {
 	return orders.CreateOrderCommand{
 		CustomerID:      uuid.New(),
-		OrderName:       "ORD_1",
 		ShippingAddress: sampleAddress(),
 		BillingAddress:  sampleAddress(),
 		Payment:         samplePayment(),
@@ -152,16 +141,12 @@ func sampleCommand() orders.CreateOrderCommand {
 
 // storedOrder builds an order the way persistence hands one back: restored,
 // with no pending events.
-func storedOrder(t *testing.T, name string, customerID domain.CustomerID) *domain.Order {
+func storedOrder(t *testing.T, customerID domain.CustomerID) *domain.Order {
 	t.Helper()
 
 	orderID, err := domain.NewOrderID(uuid.New())
 	if err != nil {
 		t.Fatalf("order id: %v", err)
-	}
-	orderName, err := domain.NewOrderName(name)
-	if err != nil {
-		t.Fatalf("order name: %v", err)
 	}
 	address, err := sampleAddressDomain()
 	if err != nil {
@@ -184,29 +169,25 @@ func storedOrder(t *testing.T, name string, customerID domain.CustomerID) *domai
 		Price:     decimal.NewFromInt(100),
 	}
 
-	return domain.Restore(orderID, customerID, orderName, address, address, payment,
+	return domain.Restore(orderID, customerID, address, address, payment,
 		domain.OrderStatusPending, []domain.OrderItem{item})
 }
 
 // unpaidOrder is an order stored without a payment, as checkouts produced
 // them before they carried a payment token.
-func unpaidOrder(t *testing.T, name string, customerID domain.CustomerID) *domain.Order {
+func unpaidOrder(t *testing.T, customerID domain.CustomerID) *domain.Order {
 	t.Helper()
 
 	orderID, err := domain.NewOrderID(uuid.New())
 	if err != nil {
 		t.Fatalf("order id: %v", err)
 	}
-	orderName, err := domain.NewOrderName(name)
-	if err != nil {
-		t.Fatalf("order name: %v", err)
-	}
 	address, err := sampleAddressDomain()
 	if err != nil {
 		t.Fatalf("address: %v", err)
 	}
 
-	order := domain.NewUnpaidOrder(orderID, customerID, orderName, address, address)
+	order := domain.NewUnpaidOrder(orderID, customerID, address, address)
 	order.PullEvents()
 
 	return order
@@ -247,8 +228,8 @@ func TestCreateStoresTheOrderWithItsLines(t *testing.T) {
 	if !ok {
 		t.Fatal("the order was not saved")
 	}
-	if stored.OrderName().String() != "ORD_1" || stored.Status() != domain.OrderStatusPending {
-		t.Errorf("order = %s/%v, want ORD_1/Pending", stored.OrderName(), stored.Status())
+	if stored.CustomerID().UUID() != command.CustomerID || stored.Status() != domain.OrderStatusPending {
+		t.Errorf("order = %s/%v, want the command's customer and Pending", stored.CustomerID(), stored.Status())
 	}
 	if items := stored.Items(); len(items) != 1 || items[0].Quantity != 2 {
 		t.Fatalf("items = %+v, want the single requested line", items)
@@ -286,7 +267,8 @@ func TestCreateReportsADomainRuleAsABadRequest(t *testing.T) {
 	handler := orders.NewCreateOrderHandler(repo)
 
 	command := sampleCommand()
-	command.OrderName = "ORD" // the domain requires exactly five characters
+	// Only the domain checks this when the handler is called directly.
+	command.Items[0].Quantity = 0
 
 	_, err := handler.Handle(t.Context(), command)
 
@@ -347,7 +329,6 @@ func TestUpdateReportsAnUnknownOrderAsNotFound(t *testing.T) {
 
 	_, err := handler.Handle(t.Context(), orders.UpdateOrderCommand{
 		ID:              uuid.New(),
-		OrderName:       "ORD_9",
 		ShippingAddress: sampleAddress(),
 		BillingAddress:  sampleAddress(),
 		Payment:         samplePayment(),
@@ -362,13 +343,12 @@ func TestUpdateReportsAnUnknownOrderAsNotFound(t *testing.T) {
 func TestUpdateChangesTheOrderAndKeepsItsLines(t *testing.T) {
 	t.Parallel()
 
-	existing := storedOrder(t, "ORD_1", customerID(t))
+	existing := storedOrder(t, customerID(t))
 	repo := newFakeRepository(existing)
 	handler := orders.NewUpdateOrderHandler(repo)
 
 	result, err := handler.Handle(t.Context(), orders.UpdateOrderCommand{
 		ID:              existing.ID().UUID(),
-		OrderName:       "ORD_2",
 		ShippingAddress: sampleAddress(),
 		BillingAddress:  sampleAddress(),
 		Payment:         samplePayment(),
@@ -382,8 +362,8 @@ func TestUpdateChangesTheOrderAndKeepsItsLines(t *testing.T) {
 	}
 
 	stored := repo.items[existing.ID().UUID()]
-	if stored.OrderName().String() != "ORD_2" || stored.Status() != domain.OrderStatusCompleted {
-		t.Errorf("order = %s/%v, want ORD_2/Completed", stored.OrderName(), stored.Status())
+	if stored.Status() != domain.OrderStatusCompleted {
+		t.Errorf("status = %v, want Completed", stored.Status())
 	}
 	// Lines are not part of an update, so they survive it untouched.
 	if items := stored.Items(); len(items) != 1 {
@@ -397,12 +377,11 @@ func TestUpdateChangesTheOrderAndKeepsItsLines(t *testing.T) {
 func TestUpdateRejectsAnUnknownStatus(t *testing.T) {
 	t.Parallel()
 
-	existing := storedOrder(t, "ORD_1", customerID(t))
+	existing := storedOrder(t, customerID(t))
 	handler := orders.NewUpdateOrderHandler(newFakeRepository(existing))
 
 	_, err := handler.Handle(t.Context(), orders.UpdateOrderCommand{
 		ID:              existing.ID().UUID(),
-		OrderName:       "ORD_1",
 		ShippingAddress: sampleAddress(),
 		BillingAddress:  sampleAddress(),
 		Payment:         samplePayment(),
@@ -417,7 +396,7 @@ func TestUpdateRejectsAnUnknownStatus(t *testing.T) {
 func TestDeleteRemovesTheOrder(t *testing.T) {
 	t.Parallel()
 
-	existing := storedOrder(t, "ORD_1", customerID(t))
+	existing := storedOrder(t, customerID(t))
 	repo := newFakeRepository(existing)
 	handler := orders.NewDeleteOrderHandler(repo)
 

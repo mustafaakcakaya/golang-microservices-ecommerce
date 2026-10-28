@@ -163,7 +163,7 @@ func skipWithoutDocker(t *testing.T) {
 
 // placeOrder stores a new order and returns it, along with the number of
 // messages its save produced.
-func placeOrder(t *testing.T, name string, alsoUpdate bool) *domain.Order {
+func placeOrder(t *testing.T, alsoUpdate bool) *domain.Order {
 	t.Helper()
 
 	repo := mssql.NewOrderRepository(sharedDB, integration.NewMapper(true).Map)
@@ -175,10 +175,6 @@ func placeOrder(t *testing.T, name string, alsoUpdate bool) *domain.Order {
 	if err != nil {
 		t.Fatalf("order id: %v", err)
 	}
-	orderName, err := domain.NewOrderName(name)
-	if err != nil {
-		t.Fatalf("order name: %v", err)
-	}
 	address, err := domain.NewAddress("Mustafa", "Akcakaya", "mustafa@example.com",
 		"Test Address", "Turkey", "Istanbul", "34000")
 	if err != nil {
@@ -189,7 +185,7 @@ func placeOrder(t *testing.T, name string, alsoUpdate bool) *domain.Order {
 		t.Fatalf("payment: %v", err)
 	}
 
-	order := domain.NewOrder(orderID, customerID, orderName, address, address, payment)
+	order := domain.NewOrder(orderID, customerID, address, address, payment)
 	if err := order.Add(productID, 2, decimal.NewFromInt(250)); err != nil {
 		t.Fatalf("adding line: %v", err)
 	}
@@ -197,7 +193,7 @@ func placeOrder(t *testing.T, name string, alsoUpdate bool) *domain.Order {
 	if alsoUpdate {
 		// A second change before the save, so one transaction produces two
 		// messages.
-		if err := order.Update(orderName, address, address, payment, domain.OrderStatusCompleted); err != nil {
+		if err := order.Update(address, address, payment, domain.OrderStatusCompleted); err != nil {
 			t.Fatalf("updating: %v", err)
 		}
 	}

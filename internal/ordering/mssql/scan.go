@@ -18,7 +18,7 @@ import (
 // defined in one place.
 const selectOrders = `
 	SELECT
-		Id, CustomerId, OrderName, Status,
+		Id, CustomerId, Status,
 		ShippingAddress_FirstName, ShippingAddress_LastName, ShippingAddress_EmailAddress,
 		ShippingAddress_AddressLine, ShippingAddress_Country, ShippingAddress_State, ShippingAddress_ZipCode,
 		BillingAddress_FirstName, BillingAddress_LastName, BillingAddress_EmailAddress,
@@ -39,7 +39,7 @@ type scanner interface {
 func scanOrder(row scanner) (*domain.Order, error) {
 	var (
 		id, customerID        guid
-		orderName, status     string
+		status                string
 		shipFirst, shipLast   string
 		shipEmail             *string
 		shipLine, shipCountry string
@@ -54,7 +54,7 @@ func scanOrder(row scanner) (*domain.Order, error) {
 	)
 
 	if err := row.Scan(
-		&id, &customerID, &orderName, &status,
+		&id, &customerID, &status,
 		&shipFirst, &shipLast, &shipEmail, &shipLine, &shipCountry, &shipState, &shipZip,
 		&billFirst, &billLast, &billEmail, &billLine, &billCountry, &billState, &billZip,
 		&paymentToken, &cardLast4, &paymentMethod,
@@ -67,10 +67,6 @@ func scanOrder(row scanner) (*domain.Order, error) {
 		return nil, err
 	}
 	customer, err := domain.NewCustomerID(uuid.UUID(customerID))
-	if err != nil {
-		return nil, err
-	}
-	name, err := domain.NewOrderName(orderName)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +87,7 @@ func scanOrder(row scanner) (*domain.Order, error) {
 		return nil, err
 	}
 
-	return domain.Restore(orderID, customer, name, shipping, billing, payment, orderStatus, nil), nil
+	return domain.Restore(orderID, customer, shipping, billing, payment, orderStatus, nil), nil
 }
 
 // scanOrderItem rebuilds one line.
@@ -135,7 +131,7 @@ func scanOrderItem(row scanner) (domain.OrderItem, error) {
 // withItems returns the order with its lines attached.
 func withItems(order *domain.Order, items []domain.OrderItem) *domain.Order {
 	return domain.Restore(
-		order.ID(), order.CustomerID(), order.OrderName(),
+		order.ID(), order.CustomerID(),
 		order.ShippingAddress(), order.BillingAddress(), order.Payment(),
 		order.Status(), items,
 	)

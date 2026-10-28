@@ -15,7 +15,6 @@ import (
 // CreateOrderCommand places a new order.
 type CreateOrderCommand struct {
 	CustomerID      uuid.UUID    `json:"customerId" validate:"required"`
-	OrderName       string       `json:"orderName" validate:"required"`
 	ShippingAddress AddressInput `json:"shippingAddress"`
 	BillingAddress  AddressInput `json:"billingAddress"`
 	Payment         PaymentInput `json:"payment"`
@@ -69,10 +68,6 @@ func buildOrder(c CreateOrderCommand) (*domain.Order, error) {
 	if err != nil {
 		return nil, err
 	}
-	orderName, err := domain.NewOrderName(c.OrderName)
-	if err != nil {
-		return nil, err
-	}
 	shipping, err := c.ShippingAddress.toDomain()
 	if err != nil {
 		return nil, fmt.Errorf("shipping address: %w", err)
@@ -86,7 +81,7 @@ func buildOrder(c CreateOrderCommand) (*domain.Order, error) {
 		return nil, err
 	}
 
-	order := domain.NewOrder(orderID, customerID, orderName, shipping, billing, payment)
+	order := domain.NewOrder(orderID, customerID, shipping, billing, payment)
 
 	for _, line := range c.Items {
 		productID, err := domain.NewProductID(line.ProductID)

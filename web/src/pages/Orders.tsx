@@ -35,7 +35,7 @@ export function Orders() {
       <table>
         <thead>
           <tr>
-            <th>Reference</th>
+            <th>Order</th>
             <th>Status</th>
             <th>Items</th>
             <th>Payment</th>
@@ -45,7 +45,8 @@ export function Orders() {
         <tbody>
           {orders.map((order) => (
             <tr key={order.id}>
-              <td>{order.orderName}</td>
+              {/* The id is the order's only identifier. */}
+              <td className="order-id">{order.id}</td>
               <td>{order.status}</td>
               <td>{order.orderItems.length}</td>
               {/* Only the last four digits ever reach the storefront. Orders

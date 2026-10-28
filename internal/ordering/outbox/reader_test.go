@@ -7,20 +7,20 @@ import (
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/integration"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/outbox"
-	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv1"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv2"
 )
 
 func TestReadingRebuildsTheStoredMessage(t *testing.T) {
 	skipWithoutDocker(t)
 
 	reader := outbox.NewReader(sharedDB)
-	order := placeOrder(t, "ORD_R", false)
+	order := placeOrder(t, false)
 
 	group := waitForGroup(t, reader, nil, order.ID().String(), 1)
 
 	message := group.Messages[0]
-	if message.Contract != (orderingv1.OrderCreated{}).Contract() {
-		t.Errorf("contract = %v, want ordering.order-created v1", message.Contract)
+	if message.Contract != (orderingv2.OrderCreated{}).Contract() {
+		t.Errorf("contract = %v, want ordering.order-created v2", message.Contract)
 	}
 	if message.AggregateID != order.ID().String() {
 		t.Errorf("aggregate = %q, want the order id", message.AggregateID)
@@ -32,11 +32,11 @@ func TestReadingRebuildsTheStoredMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decoding the captured payload: %v", err)
 	}
-	created, ok := decoded.(*orderingv1.OrderCreated)
+	created, ok := decoded.(*orderingv2.OrderCreated)
 	if !ok {
-		t.Fatalf("decoded = %T, want *orderingv1.OrderCreated", decoded)
+		t.Fatalf("decoded = %T, want *orderingv2.OrderCreated", decoded)
 	}
-	if created.OrderName != "ORD_R" || !created.TotalPrice.Equal(message500()) {
+	if created.OrderID != order.ID().UUID() || !created.TotalPrice.Equal(message500()) {
 		t.Errorf("decoded = %+v, want the order that was saved", created)
 	}
 	if strings.Contains(string(message.Payload), "5555555555554444") {
@@ -51,7 +51,7 @@ func TestOneTransactionIsOneGroup(t *testing.T) {
 
 	// Two changes to the aggregate before a single save, so both messages are
 	// written by one transaction.
-	order := placeOrder(t, "ORD_T", true)
+	order := placeOrder(t, true)
 
 	group := waitForGroup(t, reader, nil, order.ID().String(), 2)
 
@@ -69,7 +69,7 @@ func TestABatchIsNeverCutInsideATransaction(t *testing.T) {
 	skipWithoutDocker(t)
 
 	reader := outbox.NewReader(sharedDB)
-	order := placeOrder(t, "ORD_S", true)
+	order := placeOrder(t, true)
 
 	// Wait for capture first, then read with a batch smaller than the
 	// transaction that produced the messages.
@@ -95,10 +95,10 @@ func TestReadingResumesAfterTheCheckpoint(t *testing.T) {
 
 	reader := outbox.NewReader(sharedDB)
 
-	first := placeOrder(t, "ORD_1", false)
+	first := placeOrder(t, false)
 	firstGroup := waitForGroup(t, reader, nil, first.ID().String(), 1)
 
-	second := placeOrder(t, "ORD_2", false)
+	second := placeOrder(t, false)
 	secondGroup := waitForGroup(t, reader, firstGroup.LSN, second.ID().String(), 1)
 
 	// Reading from a position returns what came after it and nothing else,
@@ -121,7 +121,7 @@ func TestACheckpointOlderThanRetentionIsReported(t *testing.T) {
 	skipWithoutDocker(t)
 
 	reader := outbox.NewReader(sharedDB)
-	placeOrder(t, "ORD_E", false)
+	placeOrder(t, false)
 
 	// A position from long before anything this server retains.
 	ancient := outbox.LSN{0, 0, 0, 0, 0, 0, 0, 0, 0, 1}

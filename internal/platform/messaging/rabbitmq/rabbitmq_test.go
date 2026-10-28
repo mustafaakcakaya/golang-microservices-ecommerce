@@ -12,7 +12,7 @@ import (
 	tcrabbitmq "github.com/testcontainers/testcontainers-go/modules/rabbitmq"
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
-	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv1"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv2"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/rabbitmq"
 )
 
@@ -50,14 +50,13 @@ func sampleEnvelope(t *testing.T) messaging.Envelope {
 	t.Helper()
 
 	orderID := uuid.New()
-	event := &orderingv1.OrderCreated{
+	event := &orderingv2.OrderCreated{
 		Header:     messaging.NewHeader("trace-1"),
 		OrderID:    orderID,
 		CustomerID: uuid.New(),
-		OrderName:  "ORD_1",
 		Status:     "Pending",
 		TotalPrice: messaging.NewMoney(decimal.NewFromInt(1000)),
-		Items: []orderingv1.Line{
+		Items: []orderingv2.Line{
 			{ProductID: uuid.New(), Quantity: 2, Price: messaging.NewMoney(decimal.NewFromInt(500))},
 		},
 	}
@@ -108,7 +107,7 @@ func TestPublishingDeliversTheStoredPayloadAndItsMetadata(t *testing.T) {
 	url := brokerURL(t)
 
 	registry := messaging.NewRegistry()
-	orderingv1.Register(registry)
+	orderingv2.Register(registry)
 
 	publisher := rabbitmq.New(rabbitmq.Config{URL: url}, registry)
 	t.Cleanup(func() { _ = publisher.Close() })
@@ -136,8 +135,8 @@ func TestPublishingDeliversTheStoredPayloadAndItsMetadata(t *testing.T) {
 		if delivery.CorrelationId != "trace-1" {
 			t.Errorf("correlation id = %q, want it carried through", delivery.CorrelationId)
 		}
-		if version, _ := delivery.Headers["schema-version"].(int32); version != 1 {
-			t.Errorf("schema-version header = %v, want 1", delivery.Headers["schema-version"])
+		if version, _ := delivery.Headers["schema-version"].(int32); version != 2 {
+			t.Errorf("schema-version header = %v, want 2", delivery.Headers["schema-version"])
 		}
 		if delivery.DeliveryMode != amqp.Persistent {
 			t.Error("messages must be persistent, or a broker restart undoes the outbox")

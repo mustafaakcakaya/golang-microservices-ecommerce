@@ -227,16 +227,12 @@ func seedProduct(t *testing.T, db *sql.DB) domain.ProductID {
 	return id
 }
 
-func newOrder(t *testing.T, customerID domain.CustomerID, name string) *domain.Order {
+func newOrder(t *testing.T, customerID domain.CustomerID) *domain.Order {
 	t.Helper()
 
 	orderID, err := domain.NewOrderID(uuid.New())
 	if err != nil {
 		t.Fatalf("order id: %v", err)
-	}
-	orderName, err := domain.NewOrderName(name)
-	if err != nil {
-		t.Fatalf("order name: %v", err)
 	}
 	address, err := domain.NewAddress("Mustafa", "Akcakaya", "mustafa@example.com", "Test Address", "Turkey", "Istanbul", "34000")
 	if err != nil {
@@ -247,7 +243,7 @@ func newOrder(t *testing.T, customerID domain.CustomerID, name string) *domain.O
 		t.Fatalf("payment: %v", err)
 	}
 
-	return domain.NewOrder(orderID, customerID, orderName, address, address, payment)
+	return domain.NewOrder(orderID, customerID, address, address, payment)
 }
 
 func TestSaveAndLoadRoundTrip(t *testing.T) {
@@ -257,7 +253,7 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	customerID := seedCustomer(t, db)
 	productID := seedProduct(t, db)
 
-	order := newOrder(t, customerID, "ORD_1")
+	order := newOrder(t, customerID)
 	if err := order.Add(productID, 2, decimal.NewFromInt(500)); err != nil {
 		t.Fatalf("adding line: %v", err)
 	}
@@ -271,8 +267,8 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 		t.Fatalf("loading: %v", err)
 	}
 
-	if got.OrderName().String() != "ORD_1" || got.Status() != domain.OrderStatusPending {
-		t.Errorf("order = %s/%v, want ORD_1/Pending", got.OrderName(), got.Status())
+	if got.CustomerID() != customerID || got.Status() != domain.OrderStatusPending {
+		t.Errorf("order = %s/%v, want the customer's order, Pending", got.CustomerID(), got.Status())
 	}
 	if got.ShippingAddress().AddressLine != "Test Address" {
 		t.Errorf("shipping address = %+v, want the stored one", got.ShippingAddress())
@@ -307,17 +303,13 @@ func TestAnOrderWithoutPaymentRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("order id: %v", err)
 	}
-	orderName, err := domain.NewOrderName("ORD_N")
-	if err != nil {
-		t.Fatalf("order name: %v", err)
-	}
 	address, err := domain.NewAddress("Mustafa", "Akcakaya", "mustafa@example.com",
 		"Test Address", "Turkey", "Istanbul", "34000")
 	if err != nil {
 		t.Fatalf("address: %v", err)
 	}
 
-	order := domain.NewUnpaidOrder(orderID, customerID, orderName, address, address)
+	order := domain.NewUnpaidOrder(orderID, customerID, address, address)
 	if err := order.Add(productID, 1, decimal.NewFromInt(120)); err != nil {
 		t.Fatalf("adding line: %v", err)
 	}
@@ -372,7 +364,7 @@ func TestSavingReplacesLinesRatherThanAppending(t *testing.T) {
 	first := seedProduct(t, db)
 	second := seedProduct(t, db)
 
-	order := newOrder(t, customerID, "ORD_2")
+	order := newOrder(t, customerID)
 	if err := order.Add(first, 1, decimal.NewFromInt(100)); err != nil {
 		t.Fatalf("adding: %v", err)
 	}
@@ -405,7 +397,7 @@ func TestOrderAndLinesCommitTogether(t *testing.T) {
 
 	customerID := seedCustomer(t, db)
 
-	order := newOrder(t, customerID, "ORD_3")
+	order := newOrder(t, customerID)
 	// A product that does not exist trips the foreign key on the line insert,
 	// after the order row has already been written inside the transaction.
 	missingProduct, err := domain.NewProductID(uuid.New())
@@ -434,7 +426,7 @@ func TestSavingForAnUnknownCustomerIsARequestError(t *testing.T) {
 		t.Fatalf("customer id: %v", err)
 	}
 
-	err = repo.Save(t.Context(), newOrder(t, unknown, "ORD_4"))
+	err = repo.Save(t.Context(), newOrder(t, unknown))
 
 	// A missing customer is the caller's mistake, not a broken database.
 	if got := apperr.KindOf(err); got != apperr.KindBadRequest {
@@ -447,9 +439,9 @@ func TestListPagesAndCountsAllOrders(t *testing.T) {
 	db := sharedDB
 
 	customerID := seedCustomer(t, db)
-	for _, name := range []string{"ORD_A", "ORD_B", "ORD_C"} {
-		if err := repo.Save(t.Context(), newOrder(t, customerID, name)); err != nil {
-			t.Fatalf("saving %s: %v", name, err)
+	for range 3 {
+		if err := repo.Save(t.Context(), newOrder(t, customerID)); err != nil {
+			t.Fatalf("saving: %v", err)
 		}
 	}
 
@@ -468,65 +460,55 @@ func TestListPagesAndCountsAllOrders(t *testing.T) {
 	}
 }
 
-func TestByNameAndByCustomerFilter(t *testing.T) {
+func TestByCustomerReturnsOnlyTheirOrdersNewestFirst(t *testing.T) {
 	repo := newRepository(t)
 	db := sharedDB
 
 	mine := seedCustomer(t, db)
 	other := seedCustomer(t, db)
 
-	if err := repo.Save(t.Context(), newOrder(t, mine, "ORD_M")); err != nil {
-		t.Fatalf("saving: %v", err)
+	var placed []*domain.Order
+	for range 3 {
+		order := newOrder(t, mine)
+		if err := repo.Save(t.Context(), order); err != nil {
+			t.Fatalf("saving: %v", err)
+		}
+		placed = append(placed, order)
 	}
-	if err := repo.Save(t.Context(), newOrder(t, other, "ORD_O")); err != nil {
+	if err := repo.Save(t.Context(), newOrder(t, other)); err != nil {
 		t.Fatalf("saving: %v", err)
 	}
 
-	byName, err := repo.ByName(t.Context(), "ORD_M")
-	if err != nil {
-		t.Fatalf("by name: %v", err)
-	}
-	if len(byName) != 1 || byName[0].OrderName().String() != "ORD_M" {
-		t.Errorf("by name returned %d orders, want the one named ORD_M", len(byName))
+	// Two of them share a creation time, so the tie has to be broken by id
+	// for the order to be the same on every read.
+	if _, err := db.ExecContext(t.Context(),
+		`UPDATE Orders SET CreatedAt = '2026-01-01' WHERE Id IN (@p1, @p2)`,
+		placed[0].ID().UUID(), placed[1].ID().UUID()); err != nil {
+		t.Fatalf("backdating: %v", err)
 	}
 
 	byCustomer, err := repo.ByCustomer(t.Context(), mine)
 	if err != nil {
 		t.Fatalf("by customer: %v", err)
 	}
-	if len(byCustomer) != 1 || byCustomer[0].CustomerID() != mine {
-		t.Errorf("by customer returned %d orders, want only this customer's", len(byCustomer))
+	if len(byCustomer) != 3 {
+		t.Fatalf("by customer returned %d orders, want only this customer's three", len(byCustomer))
 	}
-}
 
-func TestByNameSearchesAndTreatsWildcardsLiterally(t *testing.T) {
-	repo := newRepository(t)
-
-	customer := seedCustomer(t, sharedDB)
-	for _, name := range []string{"Q1_AA", "Q1_%B"} {
-		if err := repo.Save(t.Context(), newOrder(t, customer, name)); err != nil {
-			t.Fatalf("saving %s: %v", name, err)
+	// The newest first. SQL Server compares uniqueidentifiers in its own byte
+	// order, so which of the tied two comes next is not predicted here; that
+	// it is the same on every read is.
+	if byCustomer[0].ID() != placed[2].ID() {
+		t.Errorf("first = %s, want the newest order %s", byCustomer[0].ID(), placed[2].ID())
+	}
+	again, err := repo.ByCustomer(t.Context(), mine)
+	if err != nil {
+		t.Fatalf("by customer again: %v", err)
+	}
+	for i := range byCustomer {
+		if again[i].ID() != byCustomer[i].ID() {
+			t.Errorf("position %d moved between reads: %s, then %s", i, byCustomer[i].ID(), again[i].ID())
 		}
-	}
-
-	// The endpoint is a search: part of a name finds every order carrying it.
-	partial, err := repo.ByName(t.Context(), "Q1_")
-	if err != nil {
-		t.Fatalf("by name: %v", err)
-	}
-	if len(partial) != 2 {
-		t.Errorf("searching Q1_ returned %d orders, want both", len(partial))
-	}
-
-	// A percent sign is a LIKE wildcard. Unescaped it would match every order
-	// in the table; escaped it means itself, so only the name containing one
-	// comes back.
-	literal, err := repo.ByName(t.Context(), "%")
-	if err != nil {
-		t.Fatalf("by name: %v", err)
-	}
-	if len(literal) != 1 || literal[0].OrderName().String() != "Q1_%B" {
-		t.Fatalf("searching %% returned %d orders, want only the one named with one", len(literal))
 	}
 }
 
@@ -537,7 +519,7 @@ func TestDeleteRemovesTheOrderAndItsLines(t *testing.T) {
 	customerID := seedCustomer(t, db)
 	productID := seedProduct(t, db)
 
-	order := newOrder(t, customerID, "ORD_D")
+	order := newOrder(t, customerID)
 	if err := order.Add(productID, 1, decimal.NewFromInt(10)); err != nil {
 		t.Fatalf("adding: %v", err)
 	}
@@ -608,7 +590,7 @@ func TestSavingAnOrderCommitsItsOutboxMessageWithIt(t *testing.T) {
 	customerID := seedCustomer(t, db)
 	productID := seedProduct(t, db)
 
-	order := newOrder(t, customerID, "ORD_B")
+	order := newOrder(t, customerID)
 	if err := order.Add(productID, 2, decimal.NewFromInt(250)); err != nil {
 		t.Fatalf("adding line: %v", err)
 	}
@@ -621,8 +603,8 @@ func TestSavingAnOrderCommitsItsOutboxMessageWithIt(t *testing.T) {
 	if len(messages) != 1 {
 		t.Fatalf("outbox rows = %d, want the single OrderCreated", len(messages))
 	}
-	if messages[0].eventType != "ordering.order-created" || messages[0].schemaVersion != 1 {
-		t.Errorf("contract = %s v%d, want ordering.order-created v1",
+	if messages[0].eventType != "ordering.order-created" || messages[0].schemaVersion != 2 {
+		t.Errorf("contract = %s v%d, want ordering.order-created v2",
 			messages[0].eventType, messages[0].schemaVersion)
 	}
 	// The payload is a contract, not the aggregate: nothing a consumer has no
@@ -652,7 +634,7 @@ func TestAFailedSaveLeavesNoOutboxMessage(t *testing.T) {
 		t.Fatalf("product id: %v", err)
 	}
 
-	order := newOrder(t, customerID, "ORD_C")
+	order := newOrder(t, customerID)
 	if err := order.Add(unknownProduct, 1, decimal.NewFromInt(10)); err != nil {
 		t.Fatalf("adding line: %v", err)
 	}
@@ -679,7 +661,7 @@ func TestUpdatingAnOrderAppendsAnUpdateMessage(t *testing.T) {
 	customerID := seedCustomer(t, db)
 	productID := seedProduct(t, db)
 
-	order := newOrder(t, customerID, "ORD_U")
+	order := newOrder(t, customerID)
 	if err := order.Add(productID, 1, decimal.NewFromInt(100)); err != nil {
 		t.Fatalf("adding line: %v", err)
 	}
@@ -687,11 +669,7 @@ func TestUpdatingAnOrderAppendsAnUpdateMessage(t *testing.T) {
 		t.Fatalf("saving: %v", err)
 	}
 
-	name, err := domain.NewOrderName("ORD_V")
-	if err != nil {
-		t.Fatalf("order name: %v", err)
-	}
-	if err := order.Update(name, order.ShippingAddress(), order.BillingAddress(),
+	if err := order.Update(order.ShippingAddress(), order.BillingAddress(),
 		order.Payment(), domain.OrderStatusCompleted); err != nil {
 		t.Fatalf("updating: %v", err)
 	}
@@ -733,12 +711,12 @@ func TestSeedIsIdempotent(t *testing.T) {
 	}
 
 	if inserted > 0 {
-		orders, err := repo.ByName(t.Context(), "ORD_1")
+		page, _, err := repo.List(t.Context(), pagination.Request{PageSize: 1})
 		if err != nil {
 			t.Fatalf("loading seeded order: %v", err)
 		}
-		if len(orders) != 1 || !orders[0].TotalPrice().Equal(decimal.NewFromInt(1400)) {
-			t.Errorf("seeded order total = %v, want 1400", orders)
+		if len(page) != 1 || !page[0].TotalPrice().Equal(decimal.NewFromInt(1400)) {
+			t.Errorf("seeded order = %v, want one totalling 1400", page)
 		}
 	}
 }

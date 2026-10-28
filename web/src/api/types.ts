@@ -37,7 +37,6 @@ export type Payment = {
 export type Order = {
   id: string;
   customerId: string;
-  orderName: string;
   status: string;
   shippingAddress: Address;
   billingAddress: Address;

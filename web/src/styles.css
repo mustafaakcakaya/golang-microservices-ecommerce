@@ -101,6 +101,13 @@ a {
   color: var(--muted);
 }
 
+.order-id {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+  /* A UUID has no spaces to wrap at. */
+  word-break: break-all;
+}
+
 .price {
   font-weight: 600;
 }

@@ -30,7 +30,6 @@ type Order struct {
 	// events are raised. A setter would be a way around both.
 	id              OrderID
 	customerID      CustomerID
-	orderName       OrderName
 	shippingAddress Address
 	billingAddress  Address
 	payment         Payment
@@ -44,9 +43,6 @@ func (o *Order) ID() OrderID { return o.id }
 
 // CustomerID is who placed it.
 func (o *Order) CustomerID() CustomerID { return o.customerID }
-
-// OrderName is its human-readable reference.
-func (o *Order) OrderName() OrderName { return o.orderName }
 
 // ShippingAddress is where it goes.
 func (o *Order) ShippingAddress() Address { return o.shippingAddress }
@@ -67,11 +63,10 @@ func (o *Order) Status() OrderStatus { return o.status }
 func NewUnpaidOrder(
 	id OrderID,
 	customerID CustomerID,
-	orderName OrderName,
 	shippingAddress Address,
 	billingAddress Address,
 ) *Order {
-	order := newOrder(id, customerID, orderName, shippingAddress, billingAddress, Payment{}, OrderStatusDraft)
+	order := newOrder(id, customerID, shippingAddress, billingAddress, Payment{}, OrderStatusDraft)
 
 	order.raise(OrderCreated{Order: order})
 
@@ -82,12 +77,11 @@ func NewUnpaidOrder(
 func NewOrder(
 	id OrderID,
 	customerID CustomerID,
-	orderName OrderName,
 	shippingAddress Address,
 	billingAddress Address,
 	payment Payment,
 ) *Order {
-	order := newOrder(id, customerID, orderName, shippingAddress, billingAddress, payment, OrderStatusPending)
+	order := newOrder(id, customerID, shippingAddress, billingAddress, payment, OrderStatusPending)
 
 	order.raise(OrderCreated{Order: order})
 
@@ -99,7 +93,6 @@ func NewOrder(
 func newOrder(
 	id OrderID,
 	customerID CustomerID,
-	orderName OrderName,
 	shippingAddress Address,
 	billingAddress Address,
 	payment Payment,
@@ -108,7 +101,6 @@ func newOrder(
 	return &Order{
 		id:              id,
 		customerID:      customerID,
-		orderName:       orderName,
 		shippingAddress: shippingAddress,
 		billingAddress:  billingAddress,
 		payment:         payment,
@@ -126,8 +118,8 @@ func newOrder(
 // The receiver is a value so that both an Order and an *Order format safely;
 // with a pointer receiver, printing a copy would fall back to walking fields.
 func (o Order) String() string {
-	return fmt.Sprintf("Order{id: %s, name: %s, status: %s, lines: %d, total: %s, payment: %v}",
-		o.id, o.orderName, o.status, len(o.items), o.TotalPrice(), o.payment)
+	return fmt.Sprintf("Order{id: %s, status: %s, lines: %d, total: %s, payment: %v}",
+		o.id, o.status, len(o.items), o.TotalPrice(), o.payment)
 }
 
 // Items returns the lines. The slice is copied so a caller cannot reach past
@@ -150,7 +142,6 @@ func (o *Order) TotalPrice() decimal.Decimal {
 
 // Update replaces the mutable parts of the order and raises OrderUpdated.
 func (o *Order) Update(
-	orderName OrderName,
 	shippingAddress Address,
 	billingAddress Address,
 	payment Payment,
@@ -160,7 +151,6 @@ func (o *Order) Update(
 		return invalidf("unknown order status %d", int(status))
 	}
 
-	o.orderName = orderName
 	o.shippingAddress = shippingAddress
 	o.billingAddress = billingAddress
 	o.payment = payment
@@ -211,14 +201,13 @@ func (o *Order) Remove(productID ProductID) {
 func Restore(
 	id OrderID,
 	customerID CustomerID,
-	orderName OrderName,
 	shippingAddress Address,
 	billingAddress Address,
 	payment Payment,
 	status OrderStatus,
 	items []OrderItem,
 ) *Order {
-	order := newOrder(id, customerID, orderName, shippingAddress, billingAddress, payment, status)
+	order := newOrder(id, customerID, shippingAddress, billingAddress, payment, status)
 
 	order.items = make([]OrderItem, len(items))
 	copy(order.items, items)

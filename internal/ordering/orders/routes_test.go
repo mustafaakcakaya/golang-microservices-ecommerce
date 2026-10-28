@@ -63,7 +63,6 @@ func sampleOrderBody() map[string]any {
 
 	return map[string]any{
 		"customerId":      "6f9619ff-8b86-d011-b42d-00cf4fc964ff",
-		"orderName":       "ORD_1",
 		"shippingAddress": address,
 		"billingAddress":  address,
 		"payment": map[string]any{
@@ -118,25 +117,10 @@ func TestPostOrdersRejectsAnOrderWithoutLines(t *testing.T) {
 	}
 }
 
-func TestPostOrdersReportsABrokenOrderNameAsABadRequest(t *testing.T) {
-	t.Parallel()
-
-	router := newRouter(newFakeRepository())
-
-	order := sampleOrderBody()
-	order["orderName"] = "ORD"
-
-	response := do(t, router, http.MethodPost, "/orders", createBody(order))
-
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body %s)", response.Code, response.Body)
-	}
-}
-
 func TestAResponseNeverCarriesThePaymentToken(t *testing.T) {
 	t.Parallel()
 
-	router := newRouter(newFakeRepository(storedOrder(t, "ORD_1", customerID(t))))
+	router := newRouter(newFakeRepository(storedOrder(t, customerID(t))))
 
 	response := do(t, router, http.MethodGet, "/orders", nil)
 
@@ -148,19 +132,65 @@ func TestAResponseNeverCarriesThePaymentToken(t *testing.T) {
 	}
 }
 
-func TestGetOrdersByNameAndByCustomerResolveToDifferentRoutes(t *testing.T) {
+func TestGetOrderByIDReturnsTheOrder(t *testing.T) {
+	t.Parallel()
+
+	order := storedOrder(t, customerID(t))
+	router := newRouter(newFakeRepository(order))
+
+	response := do(t, router, http.MethodGet, "/orders/"+order.ID().String(), nil)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", response.Code, response.Body)
+	}
+	var body struct {
+		Order orders.OrderView `json:"order"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if body.Order.ID != order.ID().UUID() || len(body.Order.Items) != 1 {
+		t.Errorf("order = %+v, want the stored order with its line", body.Order)
+	}
+	if strings.Contains(response.Body.String(), paymentToken) {
+		t.Errorf("the response leaked the payment token: %s", response.Body)
+	}
+}
+
+func TestGetOrderByIDReportsAnUnknownOrderAsNotFound(t *testing.T) {
+	t.Parallel()
+
+	router := newRouter(newFakeRepository(storedOrder(t, customerID(t))))
+
+	// One particular order was asked for, so its absence is a 404 rather than
+	// the empty list a search would answer with.
+	response := do(t, router, http.MethodGet, "/orders/6f9619ff-8b86-d011-b42d-00cf4fc964ff", nil)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body %s)", response.Code, response.Body)
+	}
+}
+
+func TestGetOrderByIDRejectsAnIDThatIsNotAUUID(t *testing.T) {
+	t.Parallel()
+
+	router := newRouter(newFakeRepository())
+
+	response := do(t, router, http.MethodGet, "/orders/ORD_1", nil)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body %s)", response.Code, response.Body)
+	}
+}
+
+func TestGetOrderByIDAndByCustomerResolveToDifferentRoutes(t *testing.T) {
 	t.Parallel()
 
 	customer := customerID(t)
-	router := newRouter(newFakeRepository(storedOrder(t, "ORD_1", customer)))
+	router := newRouter(newFakeRepository(storedOrder(t, customer)))
 
-	byName := do(t, router, http.MethodGet, "/orders/ORD_1", nil)
-	if byName.Code != http.StatusOK {
-		t.Fatalf("by name: status = %d, want 200", byName.Code)
-	}
-
-	// The static /customer segment must win over the {orderName} parameter,
-	// or a customer id would be searched for as an order name.
+	// The static /customer segment must win over the {id} parameter, or a
+	// customer lookup would be read as an order id that is not a UUID.
 	byCustomer := do(t, router, http.MethodGet, "/orders/customer/"+customer.String(), nil)
 	if byCustomer.Code != http.StatusOK {
 		t.Fatalf("by customer: status = %d, want 200 (body %s)", byCustomer.Code, byCustomer.Body)

@@ -17,7 +17,7 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/broker"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/kafka"
-	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv1"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv2"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/rabbitmq"
 )
 
@@ -65,7 +65,7 @@ func brokerConfig(t *testing.T, provider broker.Provider) broker.Config {
 		// Created up front, as an operator would: deployed clusters usually
 		// disable auto-creation, and where it is on it happens asynchronously,
 		// so the first publish would race it.
-		createTopic(t, addresses, config.Kafka.Topic((orderingv1.OrderCreated{}).Contract().EventType))
+		createTopic(t, addresses, config.Kafka.Topic((orderingv2.OrderCreated{}).Contract().EventType))
 
 		return config
 	}
@@ -95,9 +95,9 @@ func TestAMessageArrivesAsItWasSent(t *testing.T) {
 			config := brokerConfig(t, provider)
 
 			registry := messaging.NewRegistry()
-			orderingv1.Register(registry)
+			orderingv2.Register(registry)
 
-			contracts := []messaging.Contract{(orderingv1.OrderCreated{}).Contract()}
+			contracts := []messaging.Contract{(orderingv2.OrderCreated{}).Contract()}
 			log := slog.New(slog.DiscardHandler)
 
 			subscriber, err := broker.NewSubscriber(config, "checkout-test", contracts, log)
@@ -192,9 +192,9 @@ func TestAFailedHandlerLeavesTheMessageWithTheBroker(t *testing.T) {
 	config := brokerConfig(t, broker.ProviderRabbitMQ)
 
 	registry := messaging.NewRegistry()
-	orderingv1.Register(registry)
+	orderingv2.Register(registry)
 
-	contracts := []messaging.Contract{(orderingv1.OrderCreated{}).Contract()}
+	contracts := []messaging.Contract{(orderingv2.OrderCreated{}).Contract()}
 	log := slog.New(slog.DiscardHandler)
 
 	subscriber, err := broker.NewSubscriber(config, "retry-test", contracts, log)
@@ -246,14 +246,14 @@ func TestARejectedMessageIsSetAsideWithItsReason(t *testing.T) {
 			config := brokerConfig(t, provider)
 
 			const consumer = "reject-test"
-			contract := (orderingv1.OrderCreated{}).Contract()
+			contract := (orderingv2.OrderCreated{}).Contract()
 
 			if provider == broker.ProviderKafka {
 				createTopic(t, config.Kafka.Brokers, kafka.RejectedTopic(config.Kafka.Topic(contract.EventType)))
 			}
 
 			registry := messaging.NewRegistry()
-			orderingv1.Register(registry)
+			orderingv2.Register(registry)
 			log := slog.New(slog.DiscardHandler)
 
 			subscriber, err := broker.NewSubscriber(config, consumer, []messaging.Contract{contract}, log)

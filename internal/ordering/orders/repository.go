@@ -30,13 +30,10 @@ type Repository interface {
 	// ByID returns apperr.NotFound when no order has the id.
 	ByID(ctx context.Context, id domain.OrderID) (*domain.Order, error)
 
-	// List returns one page of orders and the total count.
+	// List returns one page of orders and the total count, newest first.
 	List(ctx context.Context, page pagination.Request) ([]*domain.Order, int64, error)
 
-	// ByName returns every order whose name matches the search term.
-	ByName(ctx context.Context, name string) ([]*domain.Order, error)
-
-	// ByCustomer returns every order belonging to a customer.
+	// ByCustomer returns every order belonging to a customer, newest first.
 	ByCustomer(ctx context.Context, customerID domain.CustomerID) ([]*domain.Order, error)
 
 	// Delete removes the order. Unlike the catalog's delete, removing an

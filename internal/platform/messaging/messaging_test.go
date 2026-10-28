@@ -13,19 +13,18 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/broker"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/kafka"
-	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv1"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv2"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/rabbitmq"
 )
 
-func sampleEvent() *orderingv1.OrderCreated {
-	return &orderingv1.OrderCreated{
+func sampleEvent() *orderingv2.OrderCreated {
+	return &orderingv2.OrderCreated{
 		Header:     messaging.NewHeader("trace-1"),
 		OrderID:    uuid.New(),
 		CustomerID: uuid.New(),
-		OrderName:  "ORD_1",
 		Status:     "Pending",
 		TotalPrice: messaging.NewMoney(decimal.RequireFromString("1000.50")),
-		Items: []orderingv1.Line{
+		Items: []orderingv2.Line{
 			{ProductID: uuid.New(), Quantity: 2, Price: messaging.NewMoney(decimal.RequireFromString("500.25"))},
 		},
 	}
@@ -71,8 +70,8 @@ func TestAnEnvelopeCarriesTheContractAndTheEncodedEvent(t *testing.T) {
 	if envelope.ID != event.ID {
 		t.Error("the envelope must carry the event id; it becomes the broker message id")
 	}
-	if envelope.Contract != (messaging.Contract{EventType: "ordering.order-created", Version: 1}) {
-		t.Errorf("contract = %v, want ordering.order-created v1", envelope.Contract)
+	if envelope.Contract != (messaging.Contract{EventType: "ordering.order-created", Version: 2}) {
+		t.Errorf("contract = %v, want ordering.order-created v2", envelope.Contract)
 	}
 	if envelope.AggregateID != event.OrderID.String() {
 		t.Errorf("aggregate = %q, want the order id", envelope.AggregateID)
@@ -128,7 +127,7 @@ func TestAPayloadRoundTripsThroughTheRegistry(t *testing.T) {
 	t.Parallel()
 
 	registry := messaging.NewRegistry()
-	orderingv1.Register(registry)
+	orderingv2.Register(registry)
 
 	event := sampleEvent()
 	envelope, err := messaging.NewEnvelope(event, event.OrderID.String())
@@ -141,15 +140,48 @@ func TestAPayloadRoundTripsThroughTheRegistry(t *testing.T) {
 		t.Fatalf("decoding: %v", err)
 	}
 
-	created, ok := decoded.(*orderingv1.OrderCreated)
+	created, ok := decoded.(*orderingv2.OrderCreated)
 	if !ok {
-		t.Fatalf("decoded = %T, want *orderingv1.OrderCreated", decoded)
+		t.Fatalf("decoded = %T, want *orderingv2.OrderCreated", decoded)
 	}
-	if created.OrderName != event.OrderName || !created.TotalPrice.Equal(event.TotalPrice.Decimal) {
+	if created.OrderID != event.OrderID || !created.TotalPrice.Equal(event.TotalPrice.Decimal) {
 		t.Errorf("decoded = %+v, want the event that was written", created)
 	}
 	if len(created.Items) != 1 || created.Items[0].Quantity != 2 {
 		t.Errorf("items = %+v, want the single line", created.Items)
+	}
+}
+
+func TestTheOrderEventsAreVersionTwoAndCarryNoName(t *testing.T) {
+	t.Parallel()
+
+	registry := messaging.NewRegistry()
+	orderingv2.Register(registry)
+
+	// Version 1 carried an order name. It was removed rather than kept beside
+	// version 2, so a v1 message is refused like any contract this build does
+	// not know.
+	for _, eventType := range []string{"ordering.order-created", "ordering.order-updated"} {
+		if _, err := registry.Decode(messaging.Envelope{
+			Contract: messaging.Contract{EventType: eventType, Version: 1},
+			Payload:  []byte(`{}`),
+		}); err == nil {
+			t.Errorf("%s v1 was decoded, want it refused", eventType)
+		}
+	}
+
+	for _, event := range []messaging.Event{&orderingv2.OrderCreated{}, &orderingv2.OrderUpdated{}} {
+		if version := event.Contract().Version; version != 2 {
+			t.Errorf("%s is version %d, want 2", event.Contract().EventType, version)
+		}
+
+		payload, err := json.Marshal(event)
+		if err != nil {
+			t.Fatalf("marshalling: %v", err)
+		}
+		if strings.Contains(string(payload), "orderName") {
+			t.Errorf("%s still carries the order name: %s", event.Contract().EventType, payload)
+		}
 	}
 }
 
@@ -177,7 +209,7 @@ func TestRegisteringOneContractTwiceIsAWiringMistake(t *testing.T) {
 	t.Parallel()
 
 	registry := messaging.NewRegistry()
-	orderingv1.Register(registry)
+	orderingv2.Register(registry)
 
 	defer func() {
 		if recover() == nil {
@@ -185,7 +217,7 @@ func TestRegisteringOneContractTwiceIsAWiringMistake(t *testing.T) {
 		}
 	}()
 
-	orderingv1.Register(registry)
+	orderingv2.Register(registry)
 }
 
 func TestARejectionIsRecognisedThroughWrapping(t *testing.T) {

@@ -40,7 +40,7 @@ func TestOutboxInsertsReachTheChangeTable(t *testing.T) {
 	customerID := seedCustomer(t, sharedDB)
 	productID := seedProduct(t, sharedDB)
 
-	order := newOrder(t, customerID, "ORD_K")
+	order := newOrder(t, customerID)
 	if err := order.Add(productID, 1, decimal.NewFromInt(75)); err != nil {
 		t.Fatalf("adding line: %v", err)
 	}

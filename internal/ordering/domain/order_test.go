@@ -20,16 +20,12 @@ func newOrder(t *testing.T) *domain.Order {
 	if err != nil {
 		t.Fatalf("customer id: %v", err)
 	}
-	orderName, err := domain.NewOrderName("ORD_1")
-	if err != nil {
-		t.Fatalf("order name: %v", err)
-	}
 	address, err := domain.NewAddress("Mustafa", "Akcakaya", "mustafa@example.com", "Test Address", "Turkey", "Istanbul", "34000")
 	if err != nil {
 		t.Fatalf("address: %v", err)
 	}
 
-	return domain.NewOrder(orderID, customerID, orderName, address, address, newPayment(t))
+	return domain.NewOrder(orderID, customerID, address, address, newPayment(t))
 }
 
 func productID(t *testing.T) domain.ProductID {
@@ -86,21 +82,17 @@ func TestUpdateRaisesOrderUpdatedAndAppliesChanges(t *testing.T) {
 	order := newOrder(t)
 	order.PullEvents()
 
-	newName, err := domain.NewOrderName("ORD_9")
-	if err != nil {
-		t.Fatalf("order name: %v", err)
-	}
 	address, err := domain.NewAddress("John", "Doe", "john@example.com", "Broadway 1", "England", "Nottingham", "08050")
 	if err != nil {
 		t.Fatalf("address: %v", err)
 	}
 
-	if err := order.Update(newName, address, address, newPayment(t), domain.OrderStatusCompleted); err != nil {
+	if err := order.Update(address, address, newPayment(t), domain.OrderStatusCompleted); err != nil {
 		t.Fatalf("updating: %v", err)
 	}
 
-	if order.OrderName().String() != "ORD_9" || order.Status() != domain.OrderStatusCompleted {
-		t.Errorf("order = %s/%v, want the updated values", order.OrderName(), order.Status())
+	if order.ShippingAddress().AddressLine != "Broadway 1" || order.Status() != domain.OrderStatusCompleted {
+		t.Errorf("order = %s/%v, want the updated values", order.ShippingAddress().AddressLine, order.Status())
 	}
 
 	events := order.Events()
@@ -118,7 +110,7 @@ func TestUpdateRejectsAnUnknownStatus(t *testing.T) {
 	order := newOrder(t)
 	order.PullEvents()
 
-	err := order.Update(order.OrderName(), order.ShippingAddress(), order.BillingAddress(), order.Payment(), domain.OrderStatus(99))
+	err := order.Update(order.ShippingAddress(), order.BillingAddress(), order.Payment(), domain.OrderStatus(99))
 
 	if err == nil {
 		t.Fatal("an unknown status should be rejected")
@@ -236,7 +228,7 @@ func TestRestoreDoesNotRaiseEvents(t *testing.T) {
 	original.PullEvents()
 
 	restored := domain.Restore(
-		original.ID(), original.CustomerID(), original.OrderName(),
+		original.ID(), original.CustomerID(),
 		original.ShippingAddress(), original.BillingAddress(), original.Payment(),
 		domain.OrderStatusCompleted, nil,
 	)
@@ -262,17 +254,13 @@ func TestAnUnpaidOrderStartsAsADraft(t *testing.T) {
 	if err != nil {
 		t.Fatalf("customer id: %v", err)
 	}
-	orderName, err := domain.NewOrderName("ORD_1")
-	if err != nil {
-		t.Fatalf("order name: %v", err)
-	}
 	address, err := domain.NewAddress("Mustafa", "Akcakaya", "mustafa@example.com",
 		"Test Address", "Turkey", "Istanbul", "34000")
 	if err != nil {
 		t.Fatalf("address: %v", err)
 	}
 
-	order := domain.NewUnpaidOrder(orderID, customerID, orderName, address, address)
+	order := domain.NewUnpaidOrder(orderID, customerID, address, address)
 
 	// A checkout carries no card details, so the order it produces has none.
 	// The absence has to be a state the domain can express.

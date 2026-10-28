@@ -80,7 +80,7 @@ func TestPlacingAnOrderAddsTheProductsThisServiceDidNotKnow(t *testing.T) {
 	customer := newCustomer(t)
 	unknown := newProduct(t, "Pixel 9", 700)
 
-	order := newOrder(t, customer.ID, "ORD_P")
+	order := newOrder(t, customer.ID)
 	// Twice on purpose: two lines of one product are still one product.
 	if err := order.Add(unknown.ID, 1, unknown.Price); err != nil {
 		t.Fatalf("adding line: %v", err)
@@ -119,7 +119,7 @@ func TestPlacingAnOrderKeepsWhatIsKnownAboutAProduct(t *testing.T) {
 		t.Fatalf("product: %v", err)
 	}
 
-	order := newOrder(t, customer.ID, "ORD_Q")
+	order := newOrder(t, customer.ID)
 	if err := order.Add(known, 1, renamed.Price); err != nil {
 		t.Fatalf("adding line: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestAFailedPlacementLeavesNothingBehind(t *testing.T) {
 	announced := newProduct(t, "announced", 100)
 	missing := newProduct(t, "never recorded", 100)
 
-	order := newOrder(t, customer.ID, "ORD_X")
+	order := newOrder(t, customer.ID)
 	// The line points at a product the placement does not add, so the
 	// order's foreign key refuses it - after the customer and the other
 	// product have been written in the same transaction.

@@ -104,13 +104,17 @@ Inside the Ordering service, placing an order raises a domain event carrying
 the aggregate. That event never leaves the process. It is mapped, in one place,
 to a versioned contract that does leave:
 
-- `ordering.order-created` v1
-- `ordering.order-updated` v1
+- `ordering.order-created` v2
+- `ordering.order-updated` v2
 
 Contracts are versioned in their package name and never edited in place, since
 a consumer that has not been redeployed still reads what it was written
 against. A reader that does not know an (event type, version) pair refuses the
 message rather than forwarding what it cannot read.
+
+Version 2 dropped the order name. An order is identified by its id alone, and
+the API looks one up with `GET /orders/{id}`. Version 1 was deleted rather than
+kept alongside, because nothing consumed it.
 
 **No payment data leaves the service.** An order holds a payment token, the
 last four digits of the card and the payment method; the token is not mapped
@@ -188,6 +192,7 @@ order, waiting for every in-sync replica.
 | Domain event to contract mapping | `internal/ordering/integration` |
 | Capture reader, checkpoint, retry | `internal/ordering/outbox` |
 | Contracts, envelope, publishers | `internal/platform/messaging` |
+| Order contracts | `internal/platform/messaging/orderingv2` |
 | Checkout contract | `internal/platform/messaging/basketv1` |
 | Basket checkout and relay | `internal/basket/carts`, `internal/basket/outbox` |
 | Checkout consumer | `internal/ordering/orders/checkout.go` |

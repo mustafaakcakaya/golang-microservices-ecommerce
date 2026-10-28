@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	mssql "github.com/microsoft/go-mssqldb"
 	"github.com/shopspring/decimal"
@@ -146,6 +145,12 @@ func (r *OrderRepository) ByID(ctx context.Context, id domain.OrderID) (*domain.
 	return withItems(order, items), nil
 }
 
+// newestFirst is how every list of orders is sorted. Two orders can be created
+// in the same instant, so the id breaks the tie: without it the same order
+// could turn up on two pages, or on none.
+const newestFirst = `
+		ORDER BY CreatedAt DESC, Id`
+
 // List returns a page of orders, newest first, with the total count.
 func (r *OrderRepository) List(ctx context.Context, page pagination.Request) ([]*domain.Order, int64, error) {
 	normalized := page.Normalized()
@@ -155,10 +160,7 @@ func (r *OrderRepository) List(ctx context.Context, page pagination.Request) ([]
 		return nil, 0, fmt.Errorf("counting orders: %w", err)
 	}
 
-	// A deterministic order is required for paging to be stable; OrderName is
-	// unique enough to break ties on identical timestamps.
-	rows, err := r.db.QueryContext(ctx, selectOrders+`
-		ORDER BY CreatedAt DESC, OrderName
+	rows, err := r.db.QueryContext(ctx, selectOrders+newestFirst+`
 		OFFSET @p1 ROWS FETCH NEXT @p2 ROWS ONLY`,
 		normalized.Offset(), normalized.Limit())
 	if err != nil {
@@ -174,28 +176,10 @@ func (r *OrderRepository) List(ctx context.Context, page pagination.Request) ([]
 	return orders, total, nil
 }
 
-// ByName returns every order whose name contains the search term.
-//
-// It is a search rather than a lookup: order names are short references, and
-// asking for "ORD" should find ORD_1 and ORD_2.
-func (r *OrderRepository) ByName(ctx context.Context, name string) ([]*domain.Order, error) {
-	rows, err := r.db.QueryContext(ctx, selectOrders+`
-		WHERE OrderName LIKE @p1 ESCAPE '\'
-		ORDER BY CreatedAt DESC, OrderName`,
-		"%"+escapeLike(name)+"%")
-	if err != nil {
-		return nil, fmt.Errorf("listing orders named %q: %w", name, err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	return r.collect(ctx, rows)
-}
-
-// ByCustomer returns every order belonging to a customer.
+// ByCustomer returns every order belonging to a customer, newest first.
 func (r *OrderRepository) ByCustomer(ctx context.Context, customerID domain.CustomerID) ([]*domain.Order, error) {
 	rows, err := r.db.QueryContext(ctx, selectOrders+`
-		WHERE CustomerId = @p1
-		ORDER BY CreatedAt DESC, OrderName`,
+		WHERE CustomerId = @p1`+newestFirst,
 		asGUID(customerID.UUID()))
 	if err != nil {
 		return nil, fmt.Errorf("listing orders for customer %s: %w", customerID, err)
@@ -335,17 +319,17 @@ func upsertOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
 		MERGE Orders WITH (HOLDLOCK) AS target
 		USING (SELECT @p1 AS Id) AS source ON target.Id = source.Id
 		WHEN MATCHED THEN UPDATE SET
-			CustomerId = @p2, OrderName = @p3, Status = @p4,
-			ShippingAddress_FirstName = @p5, ShippingAddress_LastName = @p6,
-			ShippingAddress_EmailAddress = @p7, ShippingAddress_AddressLine = @p8,
-			ShippingAddress_Country = @p9, ShippingAddress_State = @p10, ShippingAddress_ZipCode = @p11,
-			BillingAddress_FirstName = @p12, BillingAddress_LastName = @p13,
-			BillingAddress_EmailAddress = @p14, BillingAddress_AddressLine = @p15,
-			BillingAddress_Country = @p16, BillingAddress_State = @p17, BillingAddress_ZipCode = @p18,
-			Payment_PaymentToken = @p19, Payment_CardLast4 = @p20, Payment_PaymentMethod = @p21,
+			CustomerId = @p2, Status = @p3,
+			ShippingAddress_FirstName = @p4, ShippingAddress_LastName = @p5,
+			ShippingAddress_EmailAddress = @p6, ShippingAddress_AddressLine = @p7,
+			ShippingAddress_Country = @p8, ShippingAddress_State = @p9, ShippingAddress_ZipCode = @p10,
+			BillingAddress_FirstName = @p11, BillingAddress_LastName = @p12,
+			BillingAddress_EmailAddress = @p13, BillingAddress_AddressLine = @p14,
+			BillingAddress_Country = @p15, BillingAddress_State = @p16, BillingAddress_ZipCode = @p17,
+			Payment_PaymentToken = @p18, Payment_CardLast4 = @p19, Payment_PaymentMethod = @p20,
 			LastModifiedAt = SYSUTCDATETIME()
 		WHEN NOT MATCHED THEN INSERT (
-			Id, CustomerId, OrderName, Status,
+			Id, CustomerId, Status,
 			ShippingAddress_FirstName, ShippingAddress_LastName, ShippingAddress_EmailAddress,
 			ShippingAddress_AddressLine, ShippingAddress_Country, ShippingAddress_State, ShippingAddress_ZipCode,
 			BillingAddress_FirstName, BillingAddress_LastName, BillingAddress_EmailAddress,
@@ -353,15 +337,15 @@ func upsertOrder(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
 			Payment_PaymentToken, Payment_CardLast4, Payment_PaymentMethod,
 			CreatedAt
 		) VALUES (
-			@p1, @p2, @p3, @p4,
-			@p5, @p6, @p7, @p8, @p9, @p10, @p11,
-			@p12, @p13, @p14, @p15, @p16, @p17, @p18,
-			@p19, @p20, @p21,
+			@p1, @p2, @p3,
+			@p4, @p5, @p6, @p7, @p8, @p9, @p10,
+			@p11, @p12, @p13, @p14, @p15, @p16, @p17,
+			@p18, @p19, @p20,
 			SYSUTCDATETIME()
 		);`
 
 	_, err := tx.ExecContext(ctx, query,
-		asGUID(order.ID().UUID()), asGUID(order.CustomerID().UUID()), order.OrderName().String(), order.Status().String(),
+		asGUID(order.ID().UUID()), asGUID(order.CustomerID().UUID()), order.Status().String(),
 		shipping.FirstName, shipping.LastName, nullable(shipping.EmailAddress), shipping.AddressLine,
 		shipping.Country, shipping.State, shipping.ZipCode,
 		billing.FirstName, billing.LastName, nullable(billing.EmailAddress), billing.AddressLine,
@@ -394,23 +378,6 @@ func insertOrderItem(ctx context.Context, tx *sql.Tx, orderID domain.OrderID, it
 
 	return nil
 }
-
-// escapeLike neutralises the wildcards SQL Server's LIKE understands.
-//
-// The term is already a bound parameter, so this is not about SQL injection: it
-// is that a search for "%" would otherwise match every order, and one for "_"
-// every single-character name. Escaping keeps a search term meaning itself.
-func escapeLike(value string) string {
-	return likeEscaper.Replace(value)
-}
-
-// The backslash is declared as the escape character by the queries that use it.
-var likeEscaper = strings.NewReplacer(
-	`\`, `\\`,
-	"%", `\%`,
-	"_", `\_`,
-	"[", `\[`,
-)
 
 // nullable turns an empty string into a NULL, so an absent optional value is
 // stored as absent rather than as an empty string.

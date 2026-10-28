@@ -114,7 +114,7 @@ func (p *fakePublisher) count() int {
 func envelope() messaging.Envelope {
 	return messaging.Envelope{
 		ID:          uuid.New(),
-		Contract:    messaging.Contract{EventType: "ordering.order-created", Version: 1},
+		Contract:    messaging.Contract{EventType: "ordering.order-created", Version: 2},
 		AggregateID: uuid.NewString(),
 		Payload:     []byte(`{}`),
 	}

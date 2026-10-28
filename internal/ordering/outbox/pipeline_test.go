@@ -93,7 +93,7 @@ func startedJustBefore(t *testing.T, group outbox.Group, consumer string) outbox
 func TestAnOrderTravelsFromTheDatabaseToTheBroker(t *testing.T) {
 	skipWithoutDocker(t)
 
-	order := placeOrder(t, "ORD_F", false)
+	order := placeOrder(t, false)
 	group := waitForGroup(t, outbox.NewReader(sharedDB), nil, order.ID().String(), 1)
 
 	broker := &recordingBroker{}
@@ -115,7 +115,7 @@ func TestAnOrderTravelsFromTheDatabaseToTheBroker(t *testing.T) {
 func TestARestartResumesRatherThanRepublishing(t *testing.T) {
 	skipWithoutDocker(t)
 
-	order := placeOrder(t, "ORD_G", false)
+	order := placeOrder(t, false)
 	group := waitForGroup(t, outbox.NewReader(sharedDB), nil, order.ID().String(), 1)
 
 	broker := &recordingBroker{}
@@ -140,7 +140,7 @@ func TestARestartResumesRatherThanRepublishing(t *testing.T) {
 func TestACrashBeforeCheckpointingRedeliversAndTheInboxAbsorbsIt(t *testing.T) {
 	skipWithoutDocker(t)
 
-	order := placeOrder(t, "ORD_H", false)
+	order := placeOrder(t, false)
 	group := waitForGroup(t, outbox.NewReader(sharedDB), nil, order.ID().String(), 1)
 
 	broker := &recordingBroker{}

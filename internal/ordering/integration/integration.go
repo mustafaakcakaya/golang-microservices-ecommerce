@@ -14,7 +14,7 @@ import (
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/domain"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/httpx"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
-	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv1"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv2"
 )
 
 // Mapper turns domain events into the messages that will be stored in the
@@ -49,22 +49,20 @@ func (m Mapper) Map(ctx context.Context, event domain.Event) (messaging.Envelope
 			return messaging.Envelope{}, false, nil
 		}
 
-		return envelope(&orderingv1.OrderCreated{
+		return envelope(&orderingv2.OrderCreated{
 			Header:     header,
 			OrderID:    raised.Order.ID().UUID(),
 			CustomerID: raised.Order.CustomerID().UUID(),
-			OrderName:  raised.Order.OrderName().String(),
 			Status:     raised.Order.Status().String(),
 			TotalPrice: messaging.NewMoney(raised.Order.TotalPrice()),
 			Items:      lines(raised.Order),
 		}, raised.Order)
 
 	case domain.OrderUpdated:
-		return envelope(&orderingv1.OrderUpdated{
+		return envelope(&orderingv2.OrderUpdated{
 			Header:     header,
 			OrderID:    raised.Order.ID().UUID(),
 			CustomerID: raised.Order.CustomerID().UUID(),
-			OrderName:  raised.Order.OrderName().String(),
 			Status:     raised.Order.Status().String(),
 			TotalPrice: messaging.NewMoney(raised.Order.TotalPrice()),
 		}, raised.Order)
@@ -78,7 +76,7 @@ func (m Mapper) Map(ctx context.Context, event domain.Event) (messaging.Envelope
 // anything it was not built to understand.
 func Registry() *messaging.Registry {
 	registry := messaging.NewRegistry()
-	orderingv1.Register(registry)
+	orderingv2.Register(registry)
 
 	return registry
 }
@@ -94,12 +92,12 @@ func envelope(event messaging.Event, order *domain.Order) (messaging.Envelope, b
 
 // lines maps the order lines. Addresses and payment are not mapped at all:
 // nothing outside Ordering needs them, so nothing outside Ordering gets them.
-func lines(order *domain.Order) []orderingv1.Line {
+func lines(order *domain.Order) []orderingv2.Line {
 	items := order.Items()
 
-	mapped := make([]orderingv1.Line, 0, len(items))
+	mapped := make([]orderingv2.Line, 0, len(items))
 	for _, item := range items {
-		mapped = append(mapped, orderingv1.Line{
+		mapped = append(mapped, orderingv2.Line{
 			ProductID: item.ProductID.UUID(),
 			Quantity:  item.Quantity,
 			Price:     messaging.NewMoney(item.Price),

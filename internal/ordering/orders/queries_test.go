@@ -5,7 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/ordering/orders"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/apperr"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/pagination"
 )
 
@@ -14,9 +17,9 @@ func TestGetOrdersReturnsOnePageAndTheTotalCount(t *testing.T) {
 
 	customer := customerID(t)
 	repo := newFakeRepository(
-		storedOrder(t, "ORD_1", customer),
-		storedOrder(t, "ORD_2", customer),
-		storedOrder(t, "ORD_3", customer),
+		storedOrder(t, customer),
+		storedOrder(t, customer),
+		storedOrder(t, customer),
 	)
 	handler := orders.NewGetOrdersHandler(repo)
 
@@ -35,8 +38,8 @@ func TestGetOrdersReturnsOnePageAndTheTotalCount(t *testing.T) {
 	if len(result.Orders.Data) != 1 {
 		t.Fatalf("data = %d orders, want the single order on the second page", len(result.Orders.Data))
 	}
-	if result.Orders.Data[0].OrderName != "ORD_3" {
-		t.Errorf("order = %s, want ORD_3", result.Orders.Data[0].OrderName)
+	if want := repo.all()[2].ID().UUID(); result.Orders.Data[0].ID != want {
+		t.Errorf("order = %s, want %s, the last in the list", result.Orders.Data[0].ID, want)
 	}
 }
 
@@ -63,7 +66,7 @@ func TestAnEmptyPageSerializesAsAnEmptyList(t *testing.T) {
 func TestAViewShowsTheCardOnlyByItsLastFourDigits(t *testing.T) {
 	t.Parallel()
 
-	repo := newFakeRepository(storedOrder(t, "ORD_1", customerID(t)))
+	repo := newFakeRepository(storedOrder(t, customerID(t)))
 	handler := orders.NewGetOrdersHandler(repo)
 
 	result, err := handler.Handle(t.Context(), orders.GetOrdersQuery{})
@@ -90,7 +93,7 @@ func TestAViewShowsTheCardOnlyByItsLastFourDigits(t *testing.T) {
 func TestTheViewCarriesTheDerivedTotal(t *testing.T) {
 	t.Parallel()
 
-	repo := newFakeRepository(storedOrder(t, "ORD_1", customerID(t)))
+	repo := newFakeRepository(storedOrder(t, customerID(t)))
 	handler := orders.NewGetOrdersHandler(repo)
 
 	result, err := handler.Handle(t.Context(), orders.GetOrdersQuery{})
@@ -107,7 +110,7 @@ func TestTheViewCarriesTheDerivedTotal(t *testing.T) {
 func TestAnUnpaidOrderReportsNoPayment(t *testing.T) {
 	t.Parallel()
 
-	repo := newFakeRepository(unpaidOrder(t, "ORD_U", customerID(t)))
+	repo := newFakeRepository(unpaidOrder(t, customerID(t)))
 	handler := orders.NewGetOrdersHandler(repo)
 
 	result, err := handler.Handle(t.Context(), orders.GetOrdersQuery{})
@@ -131,40 +134,15 @@ func TestAnUnpaidOrderReportsNoPayment(t *testing.T) {
 	}
 }
 
-func TestGetOrdersByNameMatchesPartOfTheName(t *testing.T) {
+func TestGetOrderByIDHandlerReportsAnUnknownOrderAsNotFound(t *testing.T) {
 	t.Parallel()
 
-	customer := customerID(t)
-	repo := newFakeRepository(
-		storedOrder(t, "ORD_1", customer),
-		storedOrder(t, "ORD_2", customer),
-	)
-	handler := orders.NewGetOrdersByNameHandler(repo)
+	handler := orders.NewGetOrderByIDHandler(newFakeRepository(storedOrder(t, customerID(t))))
 
-	result, err := handler.Handle(t.Context(), orders.GetOrdersByNameQuery{Name: "ORD"})
-	if err != nil {
-		t.Fatalf("searching: %v", err)
-	}
+	_, err := handler.Handle(t.Context(), orders.GetOrderByIDQuery{ID: uuid.New()})
 
-	if len(result.Orders) != 2 {
-		t.Fatalf("orders = %d, want both matches", len(result.Orders))
-	}
-}
-
-func TestASearchThatMatchesNothingIsAnEmptyList(t *testing.T) {
-	t.Parallel()
-
-	repo := newFakeRepository(storedOrder(t, "ORD_1", customerID(t)))
-	handler := orders.NewGetOrdersByNameHandler(repo)
-
-	result, err := handler.Handle(t.Context(), orders.GetOrdersByNameQuery{Name: "XYZ"})
-
-	// "Nothing matches" is a valid answer to a search, not a missing resource.
-	if err != nil {
-		t.Fatalf("searching: %v", err)
-	}
-	if len(result.Orders) != 0 {
-		t.Errorf("orders = %d, want none", len(result.Orders))
+	if got := apperr.KindOf(err); got != apperr.KindNotFound {
+		t.Fatalf("kind = %v, want KindNotFound (error %v)", got, err)
 	}
 }
 
@@ -173,8 +151,8 @@ func TestGetOrdersByCustomerReturnsOnlyTheirOrders(t *testing.T) {
 
 	mine, theirs := customerID(t), customerID(t)
 	repo := newFakeRepository(
-		storedOrder(t, "ORD_1", mine),
-		storedOrder(t, "ORD_2", theirs),
+		storedOrder(t, mine),
+		storedOrder(t, theirs),
 	)
 	handler := orders.NewGetOrdersByCustomerHandler(repo)
 

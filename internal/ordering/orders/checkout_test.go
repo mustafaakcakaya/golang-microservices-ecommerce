@@ -130,10 +130,27 @@ func TestACheckoutBecomesAnOrderOfItsOwnItems(t *testing.T) {
 		t.Errorf("addresses = %+v / %+v, want the checkout's shipping and billing addresses",
 			order.ShippingAddress(), order.BillingAddress())
 	}
+}
 
-	// The domain fixes the length, so the user name cannot be the order name.
-	if got := order.OrderName().String(); len(got) != 5 {
-		t.Errorf("order name = %q, want five characters", got)
+func TestACheckoutBecomesAnOrderWhateverTheUserNameIsLike(t *testing.T) {
+	t.Parallel()
+
+	for _, userName := range []string{"a", "swn01", "a.much.longer.user.name@example.com"} {
+		repo := newFakeRepository()
+		handler := orders.NewCheckoutHandler(repo)
+
+		event := checkoutEvent(uuid.New())
+		event.UserName = userName
+
+		// Nothing about the order depends on the user name, so no shopper can
+		// have a name that keeps their checkout from becoming an order.
+		if err := handler.Handle(t.Context(), envelopeOf(t, event)); err != nil {
+			t.Errorf("user name %q: %v", userName, err)
+			continue
+		}
+		if len(repo.saved) != 1 {
+			t.Errorf("user name %q: saved %d orders, want one", userName, len(repo.saved))
+		}
 	}
 }
 
@@ -278,33 +295,5 @@ func TestTheSameCheckoutDeliveredTwiceMakesOneOrder(t *testing.T) {
 
 	if len(repo.saved) != 1 {
 		t.Errorf("saved %d orders, want one", len(repo.saved))
-	}
-}
-
-func TestOrderReferencesDoNotRepeat(t *testing.T) {
-	t.Parallel()
-
-	repo := newFakeRepository()
-	handler := orders.NewCheckoutHandler(repo)
-
-	seen := map[string]bool{}
-	for range 200 {
-		if err := handler.Handle(t.Context(), checkoutEnvelope(t, uuid.New())); err != nil {
-			t.Fatalf("handling: %v", err)
-		}
-	}
-
-	for _, order := range repo.saved {
-		name := order.OrderName().String()
-		if strings.ContainsAny(name, "IO01") {
-			t.Errorf("reference %q uses a character that is easy to misread", name)
-		}
-		seen[name] = true
-	}
-
-	// Not a uniqueness guarantee - the reference is a label, not a key - but a
-	// generator that repeated itself constantly would be useless.
-	if len(seen) < 190 {
-		t.Errorf("%d distinct references out of 200, want them spread out", len(seen))
 	}
 }

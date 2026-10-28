@@ -41,7 +41,7 @@ func (s *fakeStore) Complete(_ context.Context, messageID uuid.UUID, consumer st
 func envelope() messaging.Envelope {
 	return messaging.Envelope{
 		ID:       uuid.New(),
-		Contract: messaging.Contract{EventType: "ordering.order-created", Version: 1},
+		Contract: messaging.Contract{EventType: "ordering.order-created", Version: 2},
 		Payload:  []byte(`{}`),
 	}
 }
@@ -138,7 +138,7 @@ func TestAMessageWithoutAnIDIsRefused(t *testing.T) {
 		})
 
 	err := handle(t.Context(), messaging.Envelope{
-		Contract: messaging.Contract{EventType: "ordering.order-created", Version: 1},
+		Contract: messaging.Contract{EventType: "ordering.order-created", Version: 2},
 	})
 
 	// Nothing to deduplicate on. Handling it anyway would turn every retry

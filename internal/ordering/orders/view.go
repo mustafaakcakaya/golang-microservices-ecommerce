@@ -43,7 +43,6 @@ type OrderItemView struct {
 type OrderView struct {
 	ID              uuid.UUID   `json:"id"`
 	CustomerID      uuid.UUID   `json:"customerId"`
-	OrderName       string      `json:"orderName"`
 	Status          string      `json:"status"`
 	ShippingAddress AddressView `json:"shippingAddress"`
 	BillingAddress  AddressView `json:"billingAddress"`
@@ -76,7 +75,6 @@ func viewOf(order *domain.Order) OrderView {
 	return OrderView{
 		ID:              order.ID().UUID(),
 		CustomerID:      order.CustomerID().UUID(),
-		OrderName:       order.OrderName().String(),
 		Status:          order.Status().String(),
 		ShippingAddress: addressView(order.ShippingAddress()),
 		BillingAddress:  addressView(order.BillingAddress()),

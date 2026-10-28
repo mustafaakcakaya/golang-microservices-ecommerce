@@ -13,7 +13,7 @@ import (
 
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging"
 	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/kafka"
-	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv1"
+	"github.com/mustafaakcakaya/golang-microservices-ecommerce/internal/platform/messaging/orderingv2"
 )
 
 const cardNumber = "5555555555554444"
@@ -50,14 +50,13 @@ func sampleEnvelope(t *testing.T) messaging.Envelope {
 	t.Helper()
 
 	orderID := uuid.New()
-	event := &orderingv1.OrderCreated{
+	event := &orderingv2.OrderCreated{
 		Header:     messaging.NewHeader("trace-1"),
 		OrderID:    orderID,
 		CustomerID: uuid.New(),
-		OrderName:  "ORD_1",
 		Status:     "Pending",
 		TotalPrice: messaging.NewMoney(decimal.NewFromInt(1000)),
-		Items: []orderingv1.Line{
+		Items: []orderingv2.Line{
 			{ProductID: uuid.New(), Quantity: 2, Price: messaging.NewMoney(decimal.NewFromInt(500))},
 		},
 	}
@@ -107,7 +106,7 @@ func TestPublishingDeliversThePayloadKeyedByAggregate(t *testing.T) {
 	addresses := brokers(t)
 
 	registry := messaging.NewRegistry()
-	orderingv1.Register(registry)
+	orderingv2.Register(registry)
 
 	config := kafka.Config{Brokers: addresses, TopicPrefix: "test."}
 	publisher := kafka.New(config, registry)
@@ -149,8 +148,8 @@ func TestPublishingDeliversThePayloadKeyedByAggregate(t *testing.T) {
 	if got := headerValue(message, kafka.MessageIDHeader); got != envelope.ID.String() {
 		t.Errorf("message-id header = %q, want %s", got, envelope.ID)
 	}
-	if got := headerValue(message, kafka.SchemaVersionHeader); got != "1" {
-		t.Errorf("schema-version header = %q, want 1", got)
+	if got := headerValue(message, kafka.SchemaVersionHeader); got != "2" {
+		t.Errorf("schema-version header = %q, want 2", got)
 	}
 	if got := headerValue(message, kafka.CorrelationIDHeader); got != "trace-1" {
 		t.Errorf("correlation-id header = %q, want it carried through", got)

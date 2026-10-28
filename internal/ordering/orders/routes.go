@@ -15,9 +15,9 @@ func RegisterRoutes(r chi.Router, repo Repository, log *slog.Logger) {
 		NewGetOrdersHandler(repo),
 		cqrs.Logging[GetOrdersQuery, GetOrdersResult](log, "GetOrders"),
 	)
-	getOrdersByName := cqrs.Chain[GetOrdersByNameQuery, GetOrdersByNameResult](
-		NewGetOrdersByNameHandler(repo),
-		cqrs.Logging[GetOrdersByNameQuery, GetOrdersByNameResult](log, "GetOrdersByName"),
+	getOrderByID := cqrs.Chain[GetOrderByIDQuery, GetOrderByIDResult](
+		NewGetOrderByIDHandler(repo),
+		cqrs.Logging[GetOrderByIDQuery, GetOrderByIDResult](log, "GetOrderByID"),
 	)
 	getOrdersByCustomer := cqrs.Chain[GetOrdersByCustomerQuery, GetOrdersByCustomerResult](
 		NewGetOrdersByCustomerHandler(repo),
@@ -44,10 +44,10 @@ func RegisterRoutes(r chi.Router, repo Repository, log *slog.Logger) {
 		r.Get("/", GetOrdersRoute(getOrders, log))
 		r.Post("/", CreateOrderRoute(createOrder, log))
 		r.Put("/", UpdateOrderRoute(updateOrder, log))
+		r.Get("/{id}", GetOrderByIDRoute(getOrderByID, log))
 		r.Delete("/{id}", DeleteOrderRoute(deleteOrder, log))
 		// The static segment is matched before the parameter, so a customer
-		// lookup is not mistaken for an order name.
+		// lookup is not mistaken for an order id.
 		r.Get("/customer/{customerId}", GetOrdersByCustomerRoute(getOrdersByCustomer, log))
-		r.Get("/{orderName}", GetOrdersByNameRoute(getOrdersByName, log))
 	})
 }

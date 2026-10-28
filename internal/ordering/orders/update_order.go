@@ -20,7 +20,6 @@ import (
 // than accepted and quietly ignored.
 type UpdateOrderCommand struct {
 	ID              uuid.UUID    `json:"id" validate:"required"`
-	OrderName       string       `json:"orderName" validate:"required"`
 	ShippingAddress AddressInput `json:"shippingAddress"`
 	BillingAddress  AddressInput `json:"billingAddress"`
 	Payment         PaymentInput `json:"payment"`
@@ -72,10 +71,6 @@ func (h *UpdateOrderHandler) Handle(ctx context.Context, c UpdateOrderCommand) (
 // applyUpdate moves the command's values onto the aggregate, which raises
 // OrderUpdated and enforces the rules that guard each of them.
 func applyUpdate(order *domain.Order, c UpdateOrderCommand) error {
-	orderName, err := domain.NewOrderName(c.OrderName)
-	if err != nil {
-		return err
-	}
 	shipping, err := c.ShippingAddress.toDomain()
 	if err != nil {
 		return fmt.Errorf("shipping address: %w", err)
@@ -93,7 +88,7 @@ func applyUpdate(order *domain.Order, c UpdateOrderCommand) error {
 		return err
 	}
 
-	return order.Update(orderName, shipping, billing, payment, status)
+	return order.Update(shipping, billing, payment, status)
 }
 
 // updateOrderRequest is the wire shape of an update call.

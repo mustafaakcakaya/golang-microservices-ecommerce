@@ -51,7 +51,7 @@ func Seed(ctx context.Context, db *sql.DB) (int, error) {
 	repo := NewOrderRepository(db, DropEvents)
 	for _, order := range orders {
 		if err := repo.Save(ctx, order); err != nil {
-			return 0, fmt.Errorf("seeding order %s: %w", order.OrderName(), err)
+			return 0, fmt.Errorf("seeding order %s: %w", order.ID(), err)
 		}
 	}
 
@@ -106,16 +106,14 @@ func sampleOrders(customers []*domain.Customer, products []*domain.Product) ([]*
 	if err != nil {
 		return nil, err
 	}
-	orderName, err := domain.NewOrderName("ORD_1")
-	if err != nil {
-		return nil, err
-	}
+	// The key stays what it was when orders had names, so a database seeded
+	// before then keeps one sample order rather than gaining a second.
 	orderID, err := domain.NewOrderID(uuid.NewSHA1(seedNamespace, []byte("order:ORD_1")))
 	if err != nil {
 		return nil, err
 	}
 
-	order := domain.NewOrder(orderID, customers[0].ID, orderName, address, address, payment)
+	order := domain.NewOrder(orderID, customers[0].ID, address, address, payment)
 	if err := order.Add(products[0].ID, 2, products[0].Price); err != nil {
 		return nil, err
 	}

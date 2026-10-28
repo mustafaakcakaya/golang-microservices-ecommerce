@@ -2,7 +2,6 @@ package orders
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"strings"
 
@@ -111,11 +110,6 @@ func (h *CheckoutHandler) newOrder(
 		return nil, err
 	}
 
-	orderName, err := domain.NewOrderName(newOrderReference())
-	if err != nil {
-		return nil, err
-	}
-
 	shipping, err := addressOf(event.ShippingAddress)
 	if err != nil {
 		return nil, fmt.Errorf("shipping address: %w", err)
@@ -131,7 +125,7 @@ func (h *CheckoutHandler) newOrder(
 		return nil, fmt.Errorf("payment: %w", err)
 	}
 
-	return domain.NewOrder(orderID, customerID, orderName, shipping, billing, payment), nil
+	return domain.NewOrder(orderID, customerID, shipping, billing, payment), nil
 }
 
 func addressOf(address basketv1.Address) (domain.Address, error) {
@@ -159,32 +153,4 @@ func customerName(event basketv1.CheckoutSubmitted) string {
 	}
 
 	return full
-}
-
-// referenceAlphabet excludes letters and digits that are easy to confuse when
-// a reference is read aloud or copied from a screen.
-const referenceAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-
-// newOrderReference makes a short human-readable order name.
-//
-// The domain fixes the length at five characters, so a user name cannot be
-// used: most are the wrong length, and two customers would collide. Five
-// characters of this alphabet is about 33 million references, and the name is
-// a label rather than a key - an order is identified by its id.
-func newOrderReference() string {
-	const length = 5
-
-	// crypto/rand, so references do not follow a predictable sequence that
-	// would let one customer guess another's. It fills the slice completely
-	// and never fails.
-	reference := make([]byte, length)
-	rand.Read(reference)
-
-	for i, b := range reference {
-		// The alphabet has exactly 32 characters and 256 divides by 32, so
-		// taking the remainder keeps every character equally likely.
-		reference[i] = referenceAlphabet[b%byte(len(referenceAlphabet))]
-	}
-
-	return string(reference)
 }
